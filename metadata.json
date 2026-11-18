@@ -1,0 +1,8 @@
+{
+  "name": "Aurora Transit Network",
+  "description": "Multi-Counter Bus Ticket Booking Platform with Dynamic Branding, Counter Operator Portal, and Super Admin Console.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
