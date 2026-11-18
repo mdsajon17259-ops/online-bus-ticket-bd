@@ -5,6 +5,7 @@ import { PassengerPortal } from './components/PassengerPortal';
 import { CounterOperatorPanel } from './components/CounterOperatorPanel';
 import { SuperAdminPanel } from './components/SuperAdminPanel';
 import { AuthScreen } from './components/AuthScreen';
+import { formatBanglaNumber } from './lib/format';
 
 function AppShell() {
   const { activePanel, setActivePanel, settings } = useApp();
@@ -24,7 +25,7 @@ function AppShell() {
       <footer className="bg-white border-t border-slate-200 mt-auto">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-xs text-slate-500">
           <p>
-            © {new Date().getFullYear()} {settings.organization_name}. Multi-Counter Bus Reservation System.
+            © {formatBanglaNumber(new Date().getFullYear())} {settings.organization_name}। সর্বস্বত্ব সংরক্ষিত।
           </p>
           <div className="flex flex-wrap items-center gap-5">
             <button
@@ -32,28 +33,28 @@ function AppShell() {
               onClick={() => setActivePanel('passenger')}
               className="hover:text-slate-900 transition-colors"
             >
-              Book Tickets
+              টিকেট বুকিং
             </button>
             <button
               type="button"
               onClick={() => setActivePanel('bookings')}
               className="hover:text-slate-900 transition-colors"
             >
-              Check Booking
+              টিকেট যাচাই
             </button>
             <button
               type="button"
               onClick={() => setActivePanel('operator')}
               className="hover:text-slate-900 transition-colors"
             >
-              Counter Portal
+              কাউন্টার প্যানেল
             </button>
             <button
               type="button"
               onClick={() => setActivePanel('admin')}
               className="hover:text-slate-900 transition-colors"
             >
-              Admin Console
+              অ্যাডমিন প্যানেল
             </button>
           </div>
         </div>

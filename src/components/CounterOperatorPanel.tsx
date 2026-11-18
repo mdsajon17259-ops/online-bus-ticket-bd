@@ -7,6 +7,7 @@ import {
   fetchTripSeats,
   updateBookingStatus,
 } from '../lib/api';
+import { formatBanglaDateTime, formatBanglaNumber, formatBDT } from '../lib/format';
 import { useApp } from '../context/AppContext';
 import type { Booking, BookingStatus, Counter, Seat, Trip } from '../types';
 import { AuthScreen } from './AuthScreen';
@@ -29,7 +30,6 @@ export function CounterOperatorPanel() {
   const [actionId, setActionId] = useState<string | null>(null);
   const [error, setError] = useState('');
 
-  // Seat inspection modal
   const [inspectTrip, setInspectTrip] = useState<Trip | null>(null);
   const [inspectSeats, setInspectSeats] = useState<Seat[]>([]);
   const [loadingSeats, setLoadingSeats] = useState(false);
@@ -53,7 +53,7 @@ export function CounterOperatorPanel() {
         setCounters(cData);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load counter data');
+      setError(err instanceof Error ? err.message : 'কাউন্টারের তথ্য লোড করা যায়নি');
     } finally {
       setLoading(false);
     }
@@ -70,7 +70,7 @@ export function CounterOperatorPanel() {
       await updateBookingStatus(bookingId, nextStatus);
       await loadData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update booking');
+      setError(err instanceof Error ? err.message : 'বুকিং স্ট্যাটাস পরিবর্তন করা যায়নি');
     } finally {
       setActionId(null);
     }
@@ -127,8 +127,8 @@ export function CounterOperatorPanel() {
       <AuthScreen
         requiredRole="counter_admin"
         redirectTo="operator"
-        title="Counter Operator Sign In"
-        subtitle="Sign in with a Counter Operator account to manage reservations and seat availability for your terminal."
+        title="কাউন্টার অপারেটর লগইন"
+        subtitle="আপনার নির্দিষ্ট বাস কাউন্টারের বুকিং ও আসন পরিচালনা করতে অপারেটর অ্যাকাউন্ট দিয়ে লগইন করুন।"
       />
     );
   }
@@ -136,33 +136,40 @@ export function CounterOperatorPanel() {
   const counterTitle =
     user.role === 'super_admin'
       ? selectedAdminCounter
-        ? counters.find((c) => c.id === selectedAdminCounter)?.counter_name || 'Selected Counter'
-        : 'All Counters (Admin View)'
-      : user.counter_name || 'Assigned Counter';
+        ? counters.find((c) => c.id === selectedAdminCounter)?.counter_name || 'নির্বাচিত কাউন্টার'
+        : 'সকল কাউন্টার (অ্যাডমিন ভিউ)'
+      : user.counter_name || 'নির্ধারিত কাউন্টার';
+
+  const filterLabels: Record<'all' | BookingStatus, string> = {
+    all: 'সবগুলো',
+    pending: 'অপেক্ষমাণ',
+    confirmed: 'নিশ্চিত',
+    cancelled: 'বাতিল',
+  };
 
   return (
     <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-6">
       {/* Top Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-5">
         <div>
-          <p className="text-xs font-semibold text-blue-700">Counter Operator Dispatch</p>
+          <p className="text-xs font-semibold text-blue-700">কাউন্টার অপারেটর ড্যাশবোর্ড</p>
           <h1 className="font-display text-2xl sm:text-3xl font-bold text-slate-900 mt-0.5">
             {counterTitle}
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Signed in as {user.email} · Access restricted to assigned counter trips and bookings
+            লগইনকৃত অ্যাকাউন্ট: {user.email} · শুধুমাত্র আপনার কাউন্টারের ট্রিপ ও বুকিং দৃশ্যমান
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
           {user.role === 'super_admin' && (
             <select
-              aria-label="Filter by counter"
+              aria-label="কাউন্টার অনুযায়ী ফিল্টার করুন"
               value={selectedAdminCounter}
               onChange={(e) => setSelectedAdminCounter(e.target.value)}
               className="min-h-[40px] px-3 py-2 text-xs font-medium bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
             >
-              <option value="">All Counters</option>
+              <option value="">সকল কাউন্টার</option>
               {counters.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.counter_name}
@@ -176,7 +183,7 @@ export function CounterOperatorPanel() {
             className="min-h-[40px] px-4 py-2 text-xs font-semibold text-slate-800 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg inline-flex items-center gap-2 transition-colors whitespace-nowrap shrink-0"
           >
             <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />
-            <span>Refresh</span>
+            <span>রিফ্রেশ</span>
           </button>
         </div>
       </div>
@@ -184,27 +191,27 @@ export function CounterOperatorPanel() {
       {/* Metrics Strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white border border-slate-200 rounded-xl p-4">
-          <p className="text-xs text-slate-500">Pending Requests</p>
+          <p className="text-xs text-slate-500">অপেক্ষমাণ অনুরোধ</p>
           <p className="font-mono text-2xl font-bold text-amber-700 tabular-nums mt-1">
-            {metrics.pending}
+            {formatBanglaNumber(metrics.pending)}
           </p>
         </div>
         <div className="bg-white border border-slate-200 rounded-xl p-4">
-          <p className="text-xs text-slate-500">Confirmed Bookings</p>
+          <p className="text-xs text-slate-500">নিশ্চিত বুকিং</p>
           <p className="font-mono text-2xl font-bold text-emerald-700 tabular-nums mt-1">
-            {metrics.confirmed}
+            {formatBanglaNumber(metrics.confirmed)}
           </p>
         </div>
         <div className="bg-white border border-slate-200 rounded-xl p-4">
-          <p className="text-xs text-slate-500">Confirmed Revenue</p>
+          <p className="text-xs text-slate-500">নিশ্চিতকৃত আয়</p>
           <p className="font-mono text-2xl font-bold text-slate-900 tabular-nums mt-1">
-            ${metrics.revenue.toFixed(2)}
+            {formatBDT(metrics.revenue)}
           </p>
         </div>
         <div className="bg-white border border-slate-200 rounded-xl p-4">
-          <p className="text-xs text-slate-500">Counter Trips</p>
+          <p className="text-xs text-slate-500">কাউন্টার ট্রিপ</p>
           <p className="font-mono text-2xl font-bold text-slate-900 tabular-nums mt-1">
-            {metrics.tripsCount}
+            {formatBanglaNumber(metrics.tripsCount)}
           </p>
         </div>
       </div>
@@ -225,7 +232,7 @@ export function CounterOperatorPanel() {
               activeTab === 'bookings' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            Passenger Bookings ({bookings.length})
+            যাত্রী বুকিং ({formatBanglaNumber(bookings.length)})
           </button>
           <button
             type="button"
@@ -234,7 +241,7 @@ export function CounterOperatorPanel() {
               activeTab === 'trips' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            Counter Trips & Seats ({trips.length})
+            ট্রিপ ও আসন তালিকা ({formatBanglaNumber(trips.length)})
           </button>
         </div>
 
@@ -246,8 +253,8 @@ export function CounterOperatorPanel() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search passenger, phone, ID..."
-                aria-label="Search bookings"
+                placeholder="যাত্রী, মোবাইল বা আইডি খুঁজুন..."
+                aria-label="বুকিং খুঁজুন"
                 className="min-h-[40px] pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700 w-56"
               />
             </div>
@@ -258,11 +265,11 @@ export function CounterOperatorPanel() {
                   key={st}
                   type="button"
                   onClick={() => setStatusFilter(st)}
-                  className={`px-2.5 py-1.5 text-xs font-medium rounded-md capitalize transition-colors ${
+                  className={`px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors ${
                     statusFilter === st ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  {st}
+                  {filterLabels[st]}
                 </button>
               ))}
             </div>
@@ -281,9 +288,9 @@ export function CounterOperatorPanel() {
             </div>
           ) : filteredBookings.length === 0 ? (
             <div className="p-10 text-center">
-              <p className="text-sm font-semibold text-slate-900">No bookings found</p>
+              <p className="text-sm font-semibold text-slate-900">কোনো বুকিং পাওয়া যায়নি</p>
               <p className="text-xs text-slate-500 mt-1">
-                Passenger booking requests for your counter will appear here in real time.
+                যাত্রীরা আপনার কাউন্টারের বাসে বুকিং করলে তা এখানে তাৎক্ষণিক প্রদর্শিত হবে।
               </p>
             </div>
           ) : (
@@ -291,19 +298,19 @@ export function CounterOperatorPanel() {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-500">
-                    <th className="py-3 px-4">Booking ID</th>
-                    <th className="py-3 px-4">Passenger</th>
-                    <th className="py-3 px-4">Route & Departure</th>
-                    <th className="py-3 px-4">Seats</th>
-                    <th className="py-3 px-4 text-right">Fare</th>
-                    <th className="py-3 px-4">Status</th>
-                    <th className="py-3 px-4 text-right">Actions</th>
+                    <th className="py-3 px-4">বুকিং আইডি</th>
+                    <th className="py-3 px-4">যাত্রীর তথ্য</th>
+                    <th className="py-3 px-4">রুট ও সময়</th>
+                    <th className="py-3 px-4">আসন</th>
+                    <th className="py-3 px-4 text-right">মোট ভাড়া</th>
+                    <th className="py-3 px-4">অবস্থা</th>
+                    <th className="py-3 px-4 text-right">পদক্ষেপ</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-sm">
                   {filteredBookings.map((b) => {
                     const isBusy = actionId === b.id;
-                    const dep = b.trip ? new Date(b.trip.departure_time) : null;
+                    const dt = b.trip ? formatBanglaDateTime(b.trip.departure_time) : null;
                     return (
                       <tr key={b.id} className="hover:bg-slate-50/70 transition-colors">
                         <td className="py-3 px-4 font-mono text-xs font-semibold text-slate-900 tabular-nums whitespace-nowrap">
@@ -322,11 +329,9 @@ export function CounterOperatorPanel() {
                                 {b.trip.route_from} → {b.trip.route_to}
                               </div>
                               <div className="text-xs text-slate-500 tabular-nums">
-                                {dep && !Number.isNaN(dep.getTime())
-                                  ? `${dep.toLocaleDateString([], { month: 'short', day: 'numeric' })} · ${dep.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-                                  : b.trip.departure_time}
+                                {dt ? `${dt.date} · ${dt.time}` : b.trip.departure_time}
                                 {' · '}
-                                {b.boarding_point || 'Main Terminal'}
+                                {b.boarding_point || 'প্রধান কাউন্টার'}
                               </div>
                             </>
                           )}
@@ -335,7 +340,7 @@ export function CounterOperatorPanel() {
                           {b.selected_seats.join(', ')}
                         </td>
                         <td className="py-3 px-4 font-mono text-sm font-semibold text-slate-900 text-right tabular-nums whitespace-nowrap">
-                          ${Number(b.total_fare).toFixed(2)}
+                          {formatBDT(b.total_fare)}
                         </td>
                         <td className="py-3 px-4">
                           <StatusBadge status={b.status} />
@@ -350,7 +355,7 @@ export function CounterOperatorPanel() {
                                 className="min-h-[36px] px-3 py-1.5 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 rounded-md inline-flex items-center gap-1 transition-colors"
                               >
                                 <Check className="w-3.5 h-3.5" aria-hidden="true" />
-                                <span>Confirm</span>
+                                <span>নিশ্চিত করুন</span>
                               </button>
                             )}
                             {b.status !== 'cancelled' && (
@@ -361,7 +366,7 @@ export function CounterOperatorPanel() {
                                 className="min-h-[36px] px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 disabled:opacity-50 rounded-md inline-flex items-center gap-1 transition-colors"
                               >
                                 <X className="w-3.5 h-3.5" aria-hidden="true" />
-                                <span>Cancel</span>
+                                <span>বাতিল</span>
                               </button>
                             )}
                           </div>
@@ -380,7 +385,7 @@ export function CounterOperatorPanel() {
       {activeTab === 'trips' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {trips.map((t) => {
-            const dep = new Date(t.departure_time);
+            const dt = formatBanglaDateTime(t.departure_time);
             const avail = t.available_seats ?? t.total_seats;
             const booked = t.total_seats - avail;
             return (
@@ -396,11 +401,12 @@ export function CounterOperatorPanel() {
                     {t.route_from} → {t.route_to}
                   </p>
                   <p className="text-xs font-mono text-slate-600 tabular-nums">
-                    {dep.toLocaleDateString([], { month: 'short', day: 'numeric' })} at{' '}
-                    {dep.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {dt.date} · {dt.time}
                   </p>
                   <p className="text-xs text-slate-600 tabular-nums pt-1">
-                    <strong>{booked}</strong> booked · <strong>{avail}</strong> available ({t.total_seats} total)
+                    <strong>{formatBanglaNumber(booked)}টি</strong> বুকড ·{' '}
+                    <strong>{formatBanglaNumber(avail)}টি</strong> খালি (মোট{' '}
+                    {formatBanglaNumber(t.total_seats)}টি)
                   </p>
                 </div>
                 <button
@@ -409,7 +415,7 @@ export function CounterOperatorPanel() {
                   className="min-h-[44px] px-4 py-2 text-xs font-semibold text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
                 >
                   <Eye className="w-4 h-4" aria-hidden="true" />
-                  <span>Inspect Seats</span>
+                  <span>আসন দেখুন</span>
                 </button>
               </div>
             );
@@ -417,7 +423,9 @@ export function CounterOperatorPanel() {
           {trips.length === 0 && (
             <div className="md:col-span-2 bg-white border border-slate-200 rounded-xl p-10 text-center">
               <Bus className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-              <p className="text-sm font-semibold text-slate-900">No trips assigned to this counter</p>
+              <p className="text-sm font-semibold text-slate-900">
+                এই কাউন্টারে কোনো ট্রিপ নির্ধারিত নেই
+              </p>
             </div>
           )}
         </div>
@@ -436,12 +444,12 @@ export function CounterOperatorPanel() {
                 <h2 className="font-display text-base font-bold text-slate-900">
                   {inspectTrip.route_from} → {inspectTrip.route_to}
                 </h2>
-                <p className="text-xs text-slate-500">Live Cabin Seat Status</p>
+                <p className="text-xs text-slate-500">লাইভ আসন অবস্থা</p>
               </div>
               <button
                 type="button"
                 onClick={() => setInspectTrip(null)}
-                aria-label="Close seat map"
+                aria-label="বন্ধ করুন"
                 className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
               >
                 <X className="w-5 h-5" />

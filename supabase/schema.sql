@@ -9,7 +9,7 @@ create extension if not exists "pgcrypto";
 -- 1. APP SETTINGS TABLE (Dynamic Branding)
 create table if not exists public.app_settings (
   id integer primary key default 1,
-  organization_name text not null default 'Aurora Transit Network',
+  organization_name text not null default 'বেঙ্গল ট্রানজিট নেটওয়ার্ক',
   organization_logo_url text not null default '',
   updated_at timestamptz not null default now(),
   constraint single_settings_row check (id = 1)
@@ -247,5 +247,5 @@ create policy "Super Admin manage profiles" on public.profiles for all
 
 -- Initial Default Branding Seed
 insert into public.app_settings (id, organization_name, organization_logo_url)
-values (1, 'Aurora Transit Network', '')
+values (1, 'বেঙ্গল ট্রানজিট নেটওয়ার্ক', '')
 on conflict (id) do nothing;

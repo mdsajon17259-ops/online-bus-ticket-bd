@@ -150,43 +150,63 @@ function generateSeatsForTrip(tripId: string, totalSeats: number) {
 
 function seedDatabaseIfEmpty() {
   const existing = db.prepare('SELECT id FROM app_settings WHERE id = 1').get();
-  if (existing) return;
+  const hasOldUsSeed = db.prepare("SELECT id FROM counters WHERE id = 'c-aurora-central'").get();
+
+  if (existing && !hasOldUsSeed) return;
 
   const now = new Date().toISOString();
   const seed = db.transaction(() => {
+    if (hasOldUsSeed) {
+      db.prepare('DELETE FROM bookings').run();
+      db.prepare('DELETE FROM seats').run();
+      db.prepare('DELETE FROM trips').run();
+      db.prepare('DELETE FROM profiles').run();
+      db.prepare('DELETE FROM counters').run();
+      db.prepare('DELETE FROM app_settings').run();
+    }
+
     db.prepare(
       'INSERT INTO app_settings (id, organization_name, organization_logo_url, updated_at) VALUES (1, ?, ?, ?)'
-    ).run('Aurora Transit Network', '/src/assets/images/default_org_logo_1794840144839.jpg', now);
+    ).run('বেঙ্গল ট্রানজিট নেটওয়ার্ক', '/src/assets/images/default_org_logo_1794840144839.jpg', now);
 
-    const c1 = 'c-aurora-central';
-    const c2 = 'c-pacific-express';
-    const c3 = 'c-sierra-coach';
+    const c1 = 'c-green-line';
+    const c2 = 'c-hanif-enterprise';
+    const c3 = 'c-shyamoli-paribahan';
+    const c4 = 'c-sylhet-central';
 
     const insertCounter = db.prepare(
       'INSERT INTO counters (id, counter_name, phone, address, logo_url, created_at) VALUES (?, ?, ?, ?, ?, ?)'
     );
     insertCounter.run(
       c1,
-      'Aurora Central Terminal',
-      '+1 (415) 890-2100',
-      '720 Market Transit Plaza, Bay 1-4, San Francisco',
+      'গ্রিন লাইন পরিবহন',
+      '01711-004422',
+      '৯/২ আউটার সার্কুলার রোড, রাজারবাগ, ঢাকা-১২১৭',
       '/src/assets/images/counter_emblem_one_1794840145454.jpg',
       now
     );
     insertCounter.run(
       c2,
-      'Pacific Express Counter',
-      '+1 (415) 890-4420',
-      '210 Embarcadero Coach Hub, Gate B, San Francisco',
+      'হানিফ এন্টারপ্রাইজ',
+      '01713-402671',
+      'কল্যাণপুর ও সায়েদাবাদ বাস টার্মিনাল, ঢাকা',
       '/src/assets/images/default_org_logo_1794840144839.jpg',
       now
     );
     insertCounter.run(
       c3,
-      'Sierra Coach Lines',
-      '+1 (916) 704-1180',
-      '405 Capitol Station Concourse, Sacramento',
+      'শ্যামলী পরিবহন',
+      '01819-225588',
+      'গাবতলী কেন্দ্রীয় বাস টার্মিনাল, মিরপুর রোড, ঢাকা',
       '/src/assets/images/counter_emblem_one_1794840145454.jpg',
+      now
+    );
+    insertCounter.run(
+      c4,
+      'সিলেট কেন্দ্রীয় টার্মিনাল',
+      '01712-889911',
+      'কদমতলী কেন্দ্রীয় বাস টার্মিনাল, দক্ষিণ সুরমা, সিলেট',
+      '/src/assets/images/default_org_logo_1794840144839.jpg',
       now
     );
 
@@ -195,44 +215,53 @@ function seedDatabaseIfEmpty() {
     );
     insertProfile.run(
       'u-super-admin',
-      'admin@auroratransit.com',
-      'Maya Lin (Master Admin)',
+      'admin@bengaltransit.bd',
+      'তানভীর আহমেদ (সুপার অ্যাডমিন)',
       hashPassword('Admin123!'),
       'super_admin',
       null,
       now
     );
     insertProfile.run(
-      'u-op-central',
-      'central@auroratransit.com',
-      'Daniel Brooks',
+      'u-op-greenline',
+      'greenline@bengaltransit.bd',
+      'কামরুল হাসান',
       hashPassword('Operator123!'),
       'counter_admin',
       c1,
       now
     );
     insertProfile.run(
-      'u-op-pacific',
-      'pacific@auroratransit.com',
-      'Nadia Patel',
+      'u-op-hanif',
+      'hanif@bengaltransit.bd',
+      'রফিকুল ইসলাম',
       hashPassword('Operator123!'),
       'counter_admin',
       c2,
       now
     );
     insertProfile.run(
-      'u-op-sierra',
-      'sierra@auroratransit.com',
-      'Carlos Rivera',
+      'u-op-shyamoli',
+      'shyamoli@bengaltransit.bd',
+      'সাজ্জাদ হোসেন',
       hashPassword('Operator123!'),
       'counter_admin',
       c3,
       now
     );
     insertProfile.run(
+      'u-op-sylhet',
+      'sylhet@bengaltransit.bd',
+      'মাহবুব আলম',
+      hashPassword('Operator123!'),
+      'counter_admin',
+      c4,
+      now
+    );
+    insertProfile.run(
       'u-passenger',
-      'passenger@auroratransit.com',
-      'Elena Vance',
+      'passenger@bengaltransit.bd',
+      'নুসরাত জাহান',
       hashPassword('User123!'),
       'user',
       null,
@@ -253,14 +282,14 @@ function seedDatabaseIfEmpty() {
     );
 
     const seededTrips = [
-      { id: 't-sf-la-1', counter: c1, from: 'San Francisco', to: 'Los Angeles', dt: formatDateOffset(0, '08:30'), type: 'AC Business Sleeper', price: 54, seats: 36 },
-      { id: 't-sf-la-2', counter: c2, from: 'San Francisco', to: 'Los Angeles', dt: formatDateOffset(0, '11:15'), type: 'Executive Double-Decker', price: 62, seats: 36 },
-      { id: 't-sf-la-3', counter: c1, from: 'San Francisco', to: 'Los Angeles', dt: formatDateOffset(0, '21:00'), type: 'Night Luxury Coach', price: 68, seats: 32 },
-      { id: 't-sf-sac-1', counter: c3, from: 'San Francisco', to: 'Sacramento', dt: formatDateOffset(0, '09:45'), type: 'AC Express Shuttle', price: 28, seats: 36 },
-      { id: 't-la-sd-1', counter: c2, from: 'Los Angeles', to: 'San Diego', dt: formatDateOffset(0, '14:00'), type: 'Coastal Panorama AC', price: 32, seats: 36 },
-      { id: 't-sf-la-tom', counter: c1, from: 'San Francisco', to: 'Los Angeles', dt: formatDateOffset(1, '09:00'), type: 'AC Business Sleeper', price: 54, seats: 36 },
-      { id: 't-sf-sac-tom', counter: c3, from: 'San Francisco', to: 'Sacramento', dt: formatDateOffset(1, '13:30'), type: 'AC Express Shuttle', price: 29, seats: 36 },
-      { id: 't-sac-tahoe', counter: c3, from: 'Sacramento', to: 'Lake Tahoe', dt: formatDateOffset(2, '07:45'), type: 'Mountain Alpine Coach', price: 38, seats: 32 },
+      { id: 't-dhk-ctg-1', counter: c1, from: 'ঢাকা', to: 'চট্টগ্রাম', dt: formatDateOffset(0, '08:00'), type: 'স্ক্যানিয়া এসি বিজনেস ক্লাস', price: 1400, seats: 36 },
+      { id: 't-dhk-ctg-2', counter: c2, from: 'ঢাকা', to: 'চট্টগ্রাম', dt: formatDateOffset(0, '10:30'), type: 'হিনো নন-এসি চেয়ার কোচ', price: 680, seats: 36 },
+      { id: 't-dhk-cxb-1', counter: c1, from: 'ঢাকা', to: 'কক্সবাজার', dt: formatDateOffset(0, '22:00'), type: 'ডাবল-ডেকার এসি স্লিপার', price: 2200, seats: 32 },
+      { id: 't-dhk-syl-1', counter: c4, from: 'ঢাকা', to: 'সিলেট', dt: formatDateOffset(0, '09:15'), type: 'হুন্দাই এসি এক্সপ্রেস', price: 1200, seats: 36 },
+      { id: 't-dhk-raj-1', counter: c3, from: 'ঢাকা', to: 'রাজশাহী', dt: formatDateOffset(0, '14:30'), type: 'শ্যামলী এসি চেয়ার কোচ', price: 1100, seats: 36 },
+      { id: 't-dhk-khl-1', counter: c2, from: 'ঢাকা', to: 'খুলনা', dt: formatDateOffset(1, '08:30'), type: 'পদ্মা এক্সপ্রেস নন-এসি', price: 750, seats: 36 },
+      { id: 't-syl-dhk-1', counter: c4, from: 'সিলেট', to: 'ঢাকা', dt: formatDateOffset(1, '15:00'), type: 'এসি বিজনেস কোচ', price: 1250, seats: 36 },
+      { id: 't-dhk-cxb-2', counter: c3, from: 'ঢাকা', to: 'কক্সবাজার', dt: formatDateOffset(2, '21:30'), type: 'রাতের লাক্সারি এসি কোচ', price: 1850, seats: 32 },
     ];
 
     for (const t of seededTrips) {
@@ -268,27 +297,27 @@ function seedDatabaseIfEmpty() {
       generateSeatsForTrip(t.id, t.seats);
     }
 
-    // Reserve realistic seats and seed sample bookings
+    // Reserve realistic seats and seed sample Bangladeshi bookings
     const markBooked = db.prepare('UPDATE seats SET status = ? WHERE trip_id = ? AND seat_number = ?');
     const insertBooking = db.prepare(
       'INSERT INTO bookings (id, trip_id, passenger_name, phone, boarding_point, selected_seats, total_fare, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
 
     const b1Seats = ['A1', 'B1'];
-    for (const s of b1Seats) markBooked.run('booked', 't-sf-la-1', s);
-    insertBooking.run('BK-10421', 't-sf-la-1', 'Jordan Vance', '4155550192', 'Market Transit Plaza Bay 2', JSON.stringify(b1Seats), 108, 'confirmed', now);
+    for (const s of b1Seats) markBooked.run('booked', 't-dhk-ctg-1', s);
+    insertBooking.run('BK-10421', 't-dhk-ctg-1', 'রাশেদুল করিম', '01711223344', 'রাজারবাগ কাউন্টার, ঢাকা', JSON.stringify(b1Seats), 2800, 'confirmed', now);
 
     const b2Seats = ['C3', 'D3'];
-    for (const s of b2Seats) markBooked.run('booked', 't-sf-la-1', s);
-    insertBooking.run('BK-10422', 't-sf-la-1', 'Priya Nair', '4155550144', 'Market Transit Plaza Bay 2', JSON.stringify(b2Seats), 108, 'pending', now);
+    for (const s of b2Seats) markBooked.run('booked', 't-dhk-ctg-1', s);
+    insertBooking.run('BK-10422', 't-dhk-ctg-1', 'ফারহানা আক্তার', '01819334455', 'সায়েদাবাদ কাউন্টার, ঢাকা', JSON.stringify(b2Seats), 2800, 'pending', now);
 
     const b3Seats = ['A2', 'B2', 'C2'];
-    for (const s of b3Seats) markBooked.run('booked', 't-sf-la-2', s);
-    insertBooking.run('BK-10423', 't-sf-la-2', 'Marcus Chen', '6505550188', 'Embarcadero Gate B', JSON.stringify(b3Seats), 186, 'pending', now);
+    for (const s of b3Seats) markBooked.run('booked', 't-dhk-ctg-2', s);
+    insertBooking.run('BK-10423', 't-dhk-ctg-2', 'মাহমুদুল হাসান', '01911556677', 'কল্যাণপুর কাউন্টার, ঢাকা', JSON.stringify(b3Seats), 2040, 'pending', now);
 
     const b4Seats = ['D1'];
-    for (const s of b4Seats) markBooked.run('booked', 't-sf-sac-1', s);
-    insertBooking.run('BK-10424', 't-sf-sac-1', 'Sophia Alvarez', '9165550137', 'Market Transit Plaza Bay 4', JSON.stringify(b4Seats), 28, 'confirmed', now);
+    for (const s of b4Seats) markBooked.run('booked', 't-dhk-syl-1', s);
+    insertBooking.run('BK-10424', 't-dhk-syl-1', 'সাদিয়া আফরিন', '01715667788', 'মহাখালী বাস টার্মিনাল', JSON.stringify(b4Seats), 1200, 'confirmed', now);
   });
 
   seed();

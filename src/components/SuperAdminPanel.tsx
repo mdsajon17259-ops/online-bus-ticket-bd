@@ -25,6 +25,12 @@ import {
   updateAppSettings,
   updateUserRole,
 } from '../lib/api';
+import {
+  BANGLADESH_DISTRICTS,
+  formatBanglaDateTime,
+  formatBanglaNumber,
+  formatBDT,
+} from '../lib/format';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import { useApp } from '../context/AppContext';
 import type { AdminOverview, Counter, Profile, Trip, UserRole } from '../types';
@@ -61,8 +67,8 @@ export function SuperAdminPanel() {
   const [tFrom, setTFrom] = useState('');
   const [tTo, setTTo] = useState('');
   const [tDeparture, setTDeparture] = useState('');
-  const [tBusType, setTBusType] = useState('AC Express Coach');
-  const [tPrice, setTPrice] = useState('45');
+  const [tBusType, setTBusType] = useState('এসি বিজনেস ক্লাস কোচ');
+  const [tPrice, setTPrice] = useState('1200');
   const [tSeats, setTSeats] = useState('36');
   const [creatingTrip, setCreatingTrip] = useState(false);
 
@@ -101,7 +107,7 @@ export function SuperAdminPanel() {
         setUCounterId((prev) => prev || cList[0].id);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load admin console');
+      setError(err instanceof Error ? err.message : 'অ্যাডমিন প্যানেলের তথ্য লোড করা যায়নি');
     } finally {
       setLoading(false);
     }
@@ -120,7 +126,6 @@ export function SuperAdminPanel() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // If Supabase is configured with a 'branding' storage bucket, try uploading there first, else convert to resized data URL
     if (isSupabaseConfigured && supabase) {
       try {
         const ext = file.name.split('.').pop() || 'png';
@@ -132,7 +137,7 @@ export function SuperAdminPanel() {
           return;
         }
       } catch {
-        // Fall through to local data URL conversion
+        // Fall through to local data URL
       }
     }
 
@@ -156,9 +161,9 @@ export function SuperAdminPanel() {
       });
       setSettingsDirect(updated);
       await refreshSettings();
-      showNotice('Organization branding updated dynamically across all panels.');
+      showNotice('প্রতিষ্ঠানের নাম ও লোগো সফলভাবে আপডেট করা হয়েছে।');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save branding settings');
+      setError(err instanceof Error ? err.message : 'সেটিংস সংরক্ষণ করা যায়নি');
     } finally {
       setSavingSettings(false);
     }
@@ -180,9 +185,9 @@ export function SuperAdminPanel() {
       setCAddress('');
       setCLogoUrl('');
       await loadAdminData();
-      showNotice('New bus counter added.');
+      showNotice('নতুন বাস কাউন্টার যুক্ত করা হয়েছে।');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create counter');
+      setError(err instanceof Error ? err.message : 'কাউন্টার তৈরি করা যায়নি');
     } finally {
       setCreatingCounter(false);
     }
@@ -205,9 +210,9 @@ export function SuperAdminPanel() {
       setTFrom('');
       setTTo('');
       await loadAdminData();
-      showNotice('Trip scheduled and seat inventory generated.');
+      showNotice('নতুন ট্রিপ প্রকাশ করা হয়েছে এবং আসন তৈরি হয়েছে।');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create trip');
+      setError(err instanceof Error ? err.message : 'ট্রিপ তৈরি করা যায়নি');
     } finally {
       setCreatingTrip(false);
     }
@@ -229,9 +234,9 @@ export function SuperAdminPanel() {
       setUName('');
       setUPassword('');
       await loadAdminData();
-      showNotice('User account created and role assigned.');
+      showNotice('নতুন ব্যবহারকারী ও রোল সফলভাবে তৈরি হয়েছে।');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create user');
+      setError(err instanceof Error ? err.message : 'ব্যবহারকারী তৈরি করা যায়নি');
     } finally {
       setCreatingUser(false);
     }
@@ -242,9 +247,9 @@ export function SuperAdminPanel() {
     try {
       await updateUserRole(profileId, role, counterId);
       await loadAdminData();
-      showNotice('User permissions updated.');
+      showNotice('ব্যবহারকারীর অনুমতি আপডেট করা হয়েছে।');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update role');
+      setError(err instanceof Error ? err.message : 'রোল পরিবর্তন করা যায়নি');
     }
   };
 
@@ -261,21 +266,27 @@ export function SuperAdminPanel() {
       <AuthScreen
         requiredRole="super_admin"
         redirectTo="admin"
-        title="Super Admin Master Login"
-        subtitle="Sign in with your Super Admin credentials to manage organization branding, counters, schedules, and role access."
+        title="সুপার অ্যাডমিন মাস্টার লগইন"
+        subtitle="প্রতিষ্ঠানের ব্র্যান্ডিং, কাউন্টার, রুট, সময়সূচি ও ব্যবহারকারীর অনুমতি পরিচালনা করতে সুপার অ্যাডমিন অ্যাকাউন্ট দিয়ে লগইন করুন।"
       />
     );
   }
 
   const sidebarItems: Array<{ id: AdminSection; label: string; icon: React.ComponentType<{ className?: string }> }> = [
-    { id: 'overview', label: 'System Overview', icon: LayoutDashboard },
-    { id: 'counters', label: 'Counters & Trips', icon: Bus },
-    { id: 'users', label: 'Users & Roles', icon: Users },
-    { id: 'settings', label: 'Organization Settings', icon: Settings },
+    { id: 'overview', label: 'সার্বিক বিবরণ', icon: LayoutDashboard },
+    { id: 'counters', label: 'কাউন্টার ও ট্রিপ', icon: Bus },
+    { id: 'users', label: 'ব্যবহারকারী ও রোল', icon: Users },
+    { id: 'settings', label: 'প্রতিষ্ঠান সেটিংস', icon: Settings },
   ];
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+      <datalist id="admin-bd-districts">
+        {BANGLADESH_DISTRICTS.map((city) => (
+          <option key={city} value={city} />
+        ))}
+      </datalist>
+
       <div className="flex flex-col lg:flex-row gap-8 items-start">
         {/* Sidebar Navigation (240px desktop) */}
         <aside className="w-full lg:w-60 shrink-0 bg-white border border-slate-200 rounded-xl p-2 flex lg:flex-col gap-1 overflow-x-auto">
@@ -320,10 +331,10 @@ export function SuperAdminPanel() {
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
                   <h1 className="font-display text-2xl font-bold text-slate-900">
-                    Master System Overview
+                    মাস্টার সিস্টেম ওভারভিউ
                   </h1>
                   <p className="text-sm text-slate-600 mt-0.5">
-                    Real-time booking metrics and revenue across all {overview?.totalCounters ?? counters.length} counters.
+                    সকল {formatBanglaNumber(overview?.totalCounters ?? counters.length)}টি বাস কাউন্টারের সার্বিক বুকিং ও আয়ের হিসাব।
                   </p>
                 </div>
                 <button
@@ -331,42 +342,42 @@ export function SuperAdminPanel() {
                   onClick={() => setSection('settings')}
                   className="min-h-[40px] px-4 py-2 text-xs font-semibold text-slate-800 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors"
                 >
-                  Edit Branding
+                  ব্র্যান্ডিং পরিবর্তন করুন
                 </button>
               </div>
 
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white border border-slate-200 rounded-xl p-5">
-                  <p className="text-xs text-slate-500">Total Bookings</p>
+                  <p className="text-xs text-slate-500">মোট বুকিং</p>
                   <p className="font-mono text-2xl font-bold text-slate-900 tabular-nums mt-1">
-                    {loading ? '—' : overview?.totalBookings ?? 0}
+                    {loading ? '—' : formatBanglaNumber(overview?.totalBookings ?? 0)}
                   </p>
                   <p className="text-xs text-amber-700 mt-1 tabular-nums">
-                    {overview?.pendingBookings ?? 0} pending requests
+                    {formatBanglaNumber(overview?.pendingBookings ?? 0)}টি অপেক্ষমাণ
                   </p>
                 </div>
                 <div className="bg-white border border-slate-200 rounded-xl p-5">
-                  <p className="text-xs text-slate-500">Confirmed Revenue</p>
+                  <p className="text-xs text-slate-500">নিশ্চিতকৃত আয়</p>
                   <p className="font-mono text-2xl font-bold text-emerald-700 tabular-nums mt-1">
-                    ${loading ? '—' : (overview?.confirmedRevenue ?? 0).toFixed(2)}
+                    {loading ? '—' : formatBDT(overview?.confirmedRevenue ?? 0)}
                   </p>
                   <p className="text-xs text-slate-500 mt-1 tabular-nums">
-                    ${(overview?.pendingRevenue ?? 0).toFixed(2)} pending
+                    {formatBDT(overview?.pendingRevenue ?? 0)} অপেক্ষমাণ
                   </p>
                 </div>
                 <div className="bg-white border border-slate-200 rounded-xl p-5">
-                  <p className="text-xs text-slate-500">Active Trips</p>
+                  <p className="text-xs text-slate-500">সক্রিয় ট্রিপ</p>
                   <p className="font-mono text-2xl font-bold text-slate-900 tabular-nums mt-1">
-                    {loading ? '—' : overview?.activeTrips ?? 0}
+                    {loading ? '—' : formatBanglaNumber(overview?.activeTrips ?? 0)}
                   </p>
-                  <p className="text-xs text-slate-500 mt-1">Across all routes</p>
+                  <p className="text-xs text-slate-500 mt-1">সারা দেশের রুটসমূহ</p>
                 </div>
                 <div className="bg-white border border-slate-200 rounded-xl p-5">
-                  <p className="text-xs text-slate-500">Bus Counters</p>
+                  <p className="text-xs text-slate-500">বাস কাউন্টার</p>
                   <p className="font-mono text-2xl font-bold text-slate-900 tabular-nums mt-1">
-                    {loading ? '—' : overview?.totalCounters ?? 0}
+                    {loading ? '—' : formatBanglaNumber(overview?.totalCounters ?? 0)}
                   </p>
-                  <p className="text-xs text-slate-500 mt-1">Operating terminals</p>
+                  <p className="text-xs text-slate-500 mt-1">নিবন্ধিত টার্মিনাল</p>
                 </div>
               </div>
 
@@ -374,17 +385,17 @@ export function SuperAdminPanel() {
               <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
                 <div className="px-5 py-4 border-b border-slate-200">
                   <h2 className="font-display text-base font-bold text-slate-900">
-                    Performance by Bus Counter
+                    কাউন্টার ভিত্তিক কার্যকারিতা ও আয়
                   </h2>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-500">
-                        <th className="py-3 px-5">Counter Name</th>
-                        <th className="py-3 px-5 text-right">Scheduled Trips</th>
-                        <th className="py-3 px-5 text-right">Total Bookings</th>
-                        <th className="py-3 px-5 text-right">Confirmed Revenue</th>
+                        <th className="py-3 px-5">কাউন্টারের নাম</th>
+                        <th className="py-3 px-5 text-right">নির্ধারিত ট্রিপ</th>
+                        <th className="py-3 px-5 text-right">মোট বুকিং</th>
+                        <th className="py-3 px-5 text-right">নিশ্চিতকৃত আয়</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-sm">
@@ -392,13 +403,13 @@ export function SuperAdminPanel() {
                         <tr key={row.counter_id} className="hover:bg-slate-50/70">
                           <td className="py-3 px-5 font-medium text-slate-900">{row.counter_name}</td>
                           <td className="py-3 px-5 font-mono text-right tabular-nums text-slate-700">
-                            {row.trips_count}
+                            {formatBanglaNumber(row.trips_count)}
                           </td>
                           <td className="py-3 px-5 font-mono text-right tabular-nums text-slate-700">
-                            {row.bookings_count}
+                            {formatBanglaNumber(row.bookings_count)}
                           </td>
                           <td className="py-3 px-5 font-mono font-semibold text-right tabular-nums text-slate-900">
-                            ${Number(row.revenue).toFixed(2)}
+                            {formatBDT(row.revenue)}
                           </td>
                         </tr>
                       ))}
@@ -414,10 +425,10 @@ export function SuperAdminPanel() {
             <div className="space-y-6">
               <div>
                 <h1 className="font-display text-2xl font-bold text-slate-900">
-                  Organization Settings
+                  প্রতিষ্ঠান ও ব্র্যান্ডিং সেটিংস
                 </h1>
                 <p className="text-sm text-slate-600 mt-0.5">
-                  Update the organization name and logo stored in the <code className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded">app_settings</code> table. Changes reflect immediately in the Global Header across every panel.
+                  এখান থেকে প্রতিষ্ঠানের নাম ও লোগো পরিবর্তন করলে তা সরাসরি <code className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded">app_settings</code> টেবিলে সংরক্ষিত হয় এবং সকল প্যানেলের হেডারে সাথে সাথে দেখা যায়।
                 </p>
               </div>
 
@@ -427,12 +438,12 @@ export function SuperAdminPanel() {
               >
                 {/* Live Preview */}
                 <div className="pb-5 border-b border-slate-200">
-                  <p className="text-xs font-medium text-slate-500 mb-2.5">Live Header Branding Preview</p>
+                  <p className="text-xs font-medium text-slate-500 mb-2.5">লাইভ হেডার ব্র্যান্ডিং প্রিভিউ</p>
                   <div className="flex items-center gap-3 p-3.5 rounded-lg bg-slate-50 border border-slate-200">
                     {orgLogoUrl ? (
                       <img
                         src={orgLogoUrl}
-                        alt="Organization logo preview"
+                        alt="প্রতিষ্ঠানের লোগো প্রিভিউ"
                         referrerPolicy="no-referrer"
                         className="w-10 h-10 rounded-lg object-cover border border-slate-200 bg-white"
                       />
@@ -442,7 +453,7 @@ export function SuperAdminPanel() {
                       </span>
                     )}
                     <span className="font-display text-lg font-bold text-slate-900">
-                      {orgName || 'Organization Name'}
+                      {orgName || 'প্রতিষ্ঠানের নাম'}
                     </span>
                   </div>
                 </div>
@@ -450,7 +461,7 @@ export function SuperAdminPanel() {
                 {/* Organization Name Input */}
                 <div>
                   <label htmlFor="org-name" className="block text-xs font-medium text-slate-700 mb-1.5">
-                    Organization Name
+                    প্রতিষ্ঠানের নাম
                   </label>
                   <input
                     id="org-name"
@@ -458,7 +469,7 @@ export function SuperAdminPanel() {
                     required
                     value={orgName}
                     onChange={(e) => setOrgName(e.target.value)}
-                    placeholder="Aurora Transit Network"
+                    placeholder="বেঙ্গল ট্রানজিট নেটওয়ার্ক"
                     className="w-full min-h-[44px] px-3.5 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
                   />
                 </div>
@@ -466,7 +477,7 @@ export function SuperAdminPanel() {
                 {/* Organization Logo Upload + URL */}
                 <div className="space-y-3">
                   <label htmlFor="org-logo-url" className="block text-xs font-medium text-slate-700">
-                    Organization Logo
+                    প্রতিষ্ঠানের লোগো
                   </label>
                   <div className="flex flex-col sm:flex-row gap-3">
                     <input
@@ -474,12 +485,12 @@ export function SuperAdminPanel() {
                       type="text"
                       value={orgLogoUrl}
                       onChange={(e) => setOrgLogoUrl(e.target.value)}
-                      placeholder="https://... or upload an image file"
+                      placeholder="লোগোর লিংক দিন অথবা ফাইল আপলোড করুন"
                       className="flex-1 min-h-[44px] px-3.5 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
                     />
                     <label className="min-h-[44px] px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold rounded-lg inline-flex items-center justify-center gap-2 cursor-pointer transition-colors whitespace-nowrap shrink-0">
                       <Upload className="w-4 h-4" aria-hidden="true" />
-                      <span>Upload Logo File</span>
+                      <span>লোগো আপলোড করুন</span>
                       <input
                         type="file"
                         accept="image/*"
@@ -489,7 +500,7 @@ export function SuperAdminPanel() {
                     </label>
                   </div>
                   <p className="text-xs text-slate-500">
-                    Upload a PNG, JPG, or SVG emblem, or enter an image URL.
+                    PNG, JPG বা SVG লোগো আপলোড করুন অথবা ছবির URL বসান।
                   </p>
                 </div>
 
@@ -499,7 +510,7 @@ export function SuperAdminPanel() {
                     disabled={savingSettings}
                     className="min-h-[44px] px-6 py-2.5 bg-blue-700 hover:bg-blue-800 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors"
                   >
-                    {savingSettings ? 'Saving Changes...' : 'Save Changes'}
+                    {savingSettings ? 'সংরক্ষণ হচ্ছে...' : 'পরিবর্তন সংরক্ষণ করুন'}
                   </button>
                 </div>
               </form>
@@ -509,16 +520,16 @@ export function SuperAdminPanel() {
                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                   <Database className="w-4 h-4 text-blue-700" aria-hidden="true" />
                   <span>
-                    Active Backend:{' '}
+                    সক্রিয় ডাটাবেস:{' '}
                     {isSupabaseConfigured
-                      ? 'Supabase PostgreSQL (Connected)'
-                      : 'Built-in SQLite API Server (Supabase-Ready)'}
+                      ? 'Supabase PostgreSQL (সংযুক্ত)'
+                      : 'বিল্ট-ইন SQLite API সার্ভার (Supabase-প্রস্তুত)'}
                   </span>
                 </div>
                 <p className="text-xs text-slate-600 leading-relaxed">
                   {isSupabaseConfigured
-                    ? 'Connected directly to your Supabase project via VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.'
-                    : 'Running with persistent local SQLite storage mirroring the exact 6-table Supabase schema. To connect your cloud Supabase project, run supabase/schema.sql in your Supabase SQL Editor and set VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY in your environment.'}
+                    ? 'আপনার Supabase প্রজেক্টের সাথে সরাসরি সংযুক্ত রয়েছে।'
+                    : 'বর্তমানে স্থানীয় SQLite ডাটাবেস ব্যবহৃত হচ্ছে। ক্লাউড Supabase ব্যবহার করতে চাইলে supabase/schema.sql আপনার Supabase SQL Editor-এ রান করে VITE_SUPABASE_URL ও VITE_SUPABASE_ANON_KEY সেট করুন।'}
                 </p>
               </div>
             </div>
@@ -529,10 +540,10 @@ export function SuperAdminPanel() {
             <div className="space-y-8">
               <div>
                 <h1 className="font-display text-2xl font-bold text-slate-900">
-                  Counters, Routes & Schedules
+                  বাস কাউন্টার, রুট ও সময়সূচি ব্যবস্থাপনা
                 </h1>
                 <p className="text-sm text-slate-600 mt-0.5">
-                  Register new bus operator counters and publish intercity trips with automated seat generation.
+                  নতুন পরিবহন কাউন্টার যোগ করুন এবং স্বয়ংক্রিয় আসনসহ নতুন বাসের ট্রিপ প্রকাশ করুন।
                 </p>
               </div>
 
@@ -544,7 +555,7 @@ export function SuperAdminPanel() {
                 >
                   <h2 className="font-display text-base font-bold text-slate-900 flex items-center gap-2">
                     <Building2 className="w-4 h-4 text-blue-700" aria-hidden="true" />
-                    <span>Add New Bus Counter</span>
+                    <span>নতুন বাস কাউন্টার যোগ করুন</span>
                   </h2>
                   <div className="space-y-3">
                     <input
@@ -552,7 +563,7 @@ export function SuperAdminPanel() {
                       required
                       value={cName}
                       onChange={(e) => setCName(e.target.value)}
-                      placeholder="Counter Name (e.g. Bay Area Coach Hub)"
+                      placeholder="কাউন্টারের নাম (যেমন: এনা ট্রান্সপোর্ট)"
                       className="w-full min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
                     />
                     <input
@@ -560,7 +571,7 @@ export function SuperAdminPanel() {
                       required
                       value={cPhone}
                       onChange={(e) => setCPhone(e.target.value)}
-                      placeholder="Contact Phone (+1 415-555-0100)"
+                      placeholder="যোগাযোগের নম্বর (যেমন: 01711-000000)"
                       className="w-full min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
                     />
                     <input
@@ -568,14 +579,14 @@ export function SuperAdminPanel() {
                       required
                       value={cAddress}
                       onChange={(e) => setCAddress(e.target.value)}
-                      placeholder="Terminal Address"
+                      placeholder="টার্মিনাল বা কাউন্টারের ঠিকানা"
                       className="w-full min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
                     />
                     <input
                       type="text"
                       value={cLogoUrl}
                       onChange={(e) => setCLogoUrl(e.target.value)}
-                      placeholder="Logo URL (optional)"
+                      placeholder="লোগো URL (ঐচ্ছিক)"
                       className="w-full min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
                     />
                   </div>
@@ -585,7 +596,7 @@ export function SuperAdminPanel() {
                     className="min-h-[44px] px-4 py-2 bg-blue-700 hover:bg-blue-800 disabled:opacity-60 text-white text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 transition-colors"
                   >
                     <Plus className="w-4 h-4" aria-hidden="true" />
-                    <span>{creatingCounter ? 'Adding...' : 'Add Counter'}</span>
+                    <span>{creatingCounter ? 'যোগ করা হচ্ছে...' : 'কাউন্টার যোগ করুন'}</span>
                   </button>
                 </form>
 
@@ -596,12 +607,12 @@ export function SuperAdminPanel() {
                 >
                   <h2 className="font-display text-base font-bold text-slate-900 flex items-center gap-2">
                     <Bus className="w-4 h-4 text-blue-700" aria-hidden="true" />
-                    <span>Schedule New Trip</span>
+                    <span>নতুন ট্রিপ ও সময়সূচি যুক্ত করুন</span>
                   </h2>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <select
                       required
-                      aria-label="Select Counter"
+                      aria-label="কাউন্টার নির্বাচন করুন"
                       value={tCounterId}
                       onChange={(e) => setTCounterId(e.target.value)}
                       className="sm:col-span-2 min-h-[42px] px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
@@ -615,17 +626,19 @@ export function SuperAdminPanel() {
                     <input
                       type="text"
                       required
+                      list="admin-bd-districts"
                       value={tFrom}
                       onChange={(e) => setTFrom(e.target.value)}
-                      placeholder="Origin City (From)"
+                      placeholder="যাত্রা শুরু (যেমন: ঢাকা)"
                       className="min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
                     />
                     <input
                       type="text"
                       required
+                      list="admin-bd-districts"
                       value={tTo}
                       onChange={(e) => setTTo(e.target.value)}
-                      placeholder="Destination City (To)"
+                      placeholder="গন্তব্য (যেমন: কক্সবাজার)"
                       className="min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
                     />
                     <input
@@ -640,18 +653,18 @@ export function SuperAdminPanel() {
                       required
                       value={tBusType}
                       onChange={(e) => setTBusType(e.target.value)}
-                      placeholder="Bus Type"
+                      placeholder="বাসের ধরন (এসি / নন-এসি)"
                       className="min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
                     />
                     <div>
                       <label htmlFor="t-price" className="block text-[11px] text-slate-500 mb-1">
-                        Ticket Price ($)
+                        টিকেট মূল্য (৳ টাকা)
                       </label>
                       <input
                         id="t-price"
                         type="number"
-                        min="1"
-                        step="0.5"
+                        min="50"
+                        step="10"
                         required
                         value={tPrice}
                         onChange={(e) => setTPrice(e.target.value)}
@@ -660,7 +673,7 @@ export function SuperAdminPanel() {
                     </div>
                     <div>
                       <label htmlFor="t-seats" className="block text-[11px] text-slate-500 mb-1">
-                        Total Seats (8–60)
+                        মোট আসন সংখ্যা (৮–৬০)
                       </label>
                       <input
                         id="t-seats"
@@ -681,7 +694,7 @@ export function SuperAdminPanel() {
                     className="min-h-[44px] px-4 py-2 bg-blue-700 hover:bg-blue-800 disabled:opacity-60 text-white text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 transition-colors"
                   >
                     <Plus className="w-4 h-4" aria-hidden="true" />
-                    <span>{creatingTrip ? 'Publishing...' : 'Publish Trip'}</span>
+                    <span>{creatingTrip ? 'প্রকাশ করা হচ্ছে...' : 'ট্রিপ প্রকাশ করুন'}</span>
                   </button>
                 </form>
               </div>
@@ -690,17 +703,17 @@ export function SuperAdminPanel() {
               <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
                 <div className="px-5 py-4 border-b border-slate-200">
                   <h2 className="font-display text-base font-bold text-slate-900">
-                    Active Bus Counters ({counters.length})
+                    নিবন্ধিত বাস কাউন্টার ({formatBanglaNumber(counters.length)})
                   </h2>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-500">
-                        <th className="py-3 px-5">Counter</th>
-                        <th className="py-3 px-5">Phone</th>
-                        <th className="py-3 px-5">Address</th>
-                        <th className="py-3 px-5 text-right">Remove</th>
+                        <th className="py-3 px-5">কাউন্টারের নাম</th>
+                        <th className="py-3 px-5">মোবাইল</th>
+                        <th className="py-3 px-5">ঠিকানা</th>
+                        <th className="py-3 px-5 text-right">মুছুন</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-sm">
@@ -716,7 +729,7 @@ export function SuperAdminPanel() {
                                 await deleteCounter(c.id);
                                 await loadAdminData();
                               }}
-                              aria-label={`Delete ${c.counter_name}`}
+                              aria-label={`${c.counter_name} মুছুন`}
                               className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -733,24 +746,24 @@ export function SuperAdminPanel() {
               <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
                 <div className="px-5 py-4 border-b border-slate-200">
                   <h2 className="font-display text-base font-bold text-slate-900">
-                    Scheduled Trips ({trips.length})
+                    নির্ধারিত ট্রিপসমূহ ({formatBanglaNumber(trips.length)})
                   </h2>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-500">
-                        <th className="py-3 px-5">Route</th>
-                        <th className="py-3 px-5">Counter</th>
-                        <th className="py-3 px-5">Departure</th>
-                        <th className="py-3 px-5 text-right">Seats</th>
-                        <th className="py-3 px-5 text-right">Price</th>
-                        <th className="py-3 px-5 text-right">Remove</th>
+                        <th className="py-3 px-5">রুট ও বাসের ধরন</th>
+                        <th className="py-3 px-5">কাউন্টার</th>
+                        <th className="py-3 px-5">যাত্রার সময়</th>
+                        <th className="py-3 px-5 text-right">আসন</th>
+                        <th className="py-3 px-5 text-right">ভাড়া</th>
+                        <th className="py-3 px-5 text-right">মুছুন</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-sm">
                       {trips.map((t) => {
-                        const dep = new Date(t.departure_time);
+                        const dt = formatBanglaDateTime(t.departure_time);
                         return (
                           <tr key={t.id} className="hover:bg-slate-50/70">
                             <td className="py-3 px-5">
@@ -761,14 +774,13 @@ export function SuperAdminPanel() {
                             </td>
                             <td className="py-3 px-5 text-xs text-slate-700">{t.counter_name}</td>
                             <td className="py-3 px-5 font-mono text-xs text-slate-600 tabular-nums">
-                              {dep.toLocaleDateString([], { month: 'short', day: 'numeric' })}{' '}
-                              {dep.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              {dt.date} · {dt.time}
                             </td>
                             <td className="py-3 px-5 font-mono text-xs text-right tabular-nums text-slate-700">
-                              {t.available_seats ?? t.total_seats}/{t.total_seats}
+                              {formatBanglaNumber(t.available_seats ?? t.total_seats)}/{formatBanglaNumber(t.total_seats)}
                             </td>
                             <td className="py-3 px-5 font-mono font-semibold text-right tabular-nums text-slate-900">
-                              ${Number(t.price).toFixed(2)}
+                              {formatBDT(t.price)}
                             </td>
                             <td className="py-3 px-5 text-right">
                               <button
@@ -777,7 +789,7 @@ export function SuperAdminPanel() {
                                   await deleteTrip(t.id);
                                   await loadAdminData();
                                 }}
-                                aria-label={`Delete trip ${t.route_from} to ${t.route_to}`}
+                                aria-label={`${t.route_from} থেকে ${t.route_to} ট্রিপ মুছুন`}
                                 className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
                               >
                                 <Trash2 className="w-4 h-4" />
@@ -798,10 +810,10 @@ export function SuperAdminPanel() {
             <div className="space-y-6">
               <div>
                 <h1 className="font-display text-2xl font-bold text-slate-900">
-                  User Management & Roles
+                  ব্যবহারকারী ও রোল ব্যবস্থাপনা
                 </h1>
                 <p className="text-sm text-slate-600 mt-0.5">
-                  Create accounts and assign users to Super Admin, Counter Operator (linked to a specific counter), or Passenger roles.
+                  নতুন অ্যাকাউন্ট তৈরি করুন এবং সুপার অ্যাডমিন, কাউন্টার অপারেটর অথবা যাত্রী রোল নির্ধারণ করুন।
                 </p>
               </div>
 
@@ -811,7 +823,7 @@ export function SuperAdminPanel() {
                 className="bg-white border border-slate-200 rounded-xl p-5 space-y-4"
               >
                 <h2 className="font-display text-base font-bold text-slate-900">
-                  Create Staff or Passenger Account
+                  নতুন অপারেটর বা ব্যবহারকারী অ্যাকাউন্ট তৈরি করুন
                 </h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   <input
@@ -819,7 +831,7 @@ export function SuperAdminPanel() {
                     required
                     value={uName}
                     onChange={(e) => setUName(e.target.value)}
-                    placeholder="Full Name"
+                    placeholder="পূর্ণ নাম"
                     className="min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
                   />
                   <input
@@ -827,7 +839,7 @@ export function SuperAdminPanel() {
                     required
                     value={uEmail}
                     onChange={(e) => setUEmail(e.target.value)}
-                    placeholder="Email Address"
+                    placeholder="ইমেইল ঠিকানা"
                     className="min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
                   />
                   <input
@@ -836,23 +848,23 @@ export function SuperAdminPanel() {
                     minLength={6}
                     value={uPassword}
                     onChange={(e) => setUPassword(e.target.value)}
-                    placeholder="Initial Password (min 6 chars)"
+                    placeholder="পাসওয়ার্ড (কমপক্ষে ৬ অক্ষর)"
                     className="min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
                   />
                   <select
-                    aria-label="Assign Role"
+                    aria-label="রোল নির্বাচন করুন"
                     value={uRole}
                     onChange={(e) => setURole(e.target.value as UserRole)}
                     className="min-h-[42px] px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
                   >
-                    <option value="counter_admin">Counter Operator</option>
-                    <option value="super_admin">Super Admin</option>
-                    <option value="user">Passenger (User)</option>
+                    <option value="counter_admin">কাউন্টার অপারেটর</option>
+                    <option value="super_admin">সুপার অ্যাডমিন</option>
+                    <option value="user">সাধারণ যাত্রী</option>
                   </select>
 
                   {uRole === 'counter_admin' && (
                     <select
-                      aria-label="Assign Counter"
+                      aria-label="কাউন্টার নির্ধারণ করুন"
                       value={uCounterId}
                       onChange={(e) => setUCounterId(e.target.value)}
                       className="min-h-[42px] px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
@@ -871,7 +883,7 @@ export function SuperAdminPanel() {
                     className="min-h-[42px] px-4 py-2 bg-blue-700 hover:bg-blue-800 disabled:opacity-60 text-white text-xs font-semibold rounded-lg inline-flex items-center justify-center gap-1.5 transition-colors"
                   >
                     <Plus className="w-4 h-4" aria-hidden="true" />
-                    <span>{creatingUser ? 'Creating...' : 'Create Account'}</span>
+                    <span>{creatingUser ? 'তৈরি হচ্ছে...' : 'অ্যাকাউন্ট তৈরি করুন'}</span>
                   </button>
                 </div>
               </form>
@@ -882,10 +894,10 @@ export function SuperAdminPanel() {
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-500">
-                        <th className="py-3 px-5">Account</th>
-                        <th className="py-3 px-5">Role Assignment</th>
-                        <th className="py-3 px-5">Assigned Counter</th>
-                        <th className="py-3 px-5 text-right">Remove</th>
+                        <th className="py-3 px-5">অ্যাকাউন্ট</th>
+                        <th className="py-3 px-5">রোল</th>
+                        <th className="py-3 px-5">নির্ধারিত কাউন্টার</th>
+                        <th className="py-3 px-5 text-right">মুছুন</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-sm">
@@ -897,7 +909,7 @@ export function SuperAdminPanel() {
                           </td>
                           <td className="py-3 px-5">
                             <select
-                              aria-label={`Role for ${u.email}`}
+                              aria-label={`${u.email} এর রোল`}
                               value={u.role}
                               disabled={u.id === user.id}
                               onChange={(e) => {
@@ -910,15 +922,15 @@ export function SuperAdminPanel() {
                               }}
                               className="min-h-[36px] px-2.5 py-1 text-xs font-medium bg-white border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-700 disabled:bg-slate-100"
                             >
-                              <option value="user">Passenger (user)</option>
-                              <option value="counter_admin">Counter Operator (counter_admin)</option>
-                              <option value="super_admin">Super Admin (super_admin)</option>
+                              <option value="user">যাত্রী (user)</option>
+                              <option value="counter_admin">কাউন্টার অপারেটর (counter_admin)</option>
+                              <option value="super_admin">সুপার অ্যাডমিন (super_admin)</option>
                             </select>
                           </td>
                           <td className="py-3 px-5">
                             {u.role === 'counter_admin' ? (
                               <select
-                                aria-label={`Counter for ${u.email}`}
+                                aria-label={`${u.email} এর কাউন্টার`}
                                 value={u.counter_id || ''}
                                 onChange={(e) => handleRoleUpdate(u.id, 'counter_admin', e.target.value)}
                                 className="min-h-[36px] px-2.5 py-1 text-xs font-medium bg-white border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-700"
@@ -930,7 +942,7 @@ export function SuperAdminPanel() {
                                 ))}
                               </select>
                             ) : (
-                              <span className="text-xs text-slate-400">Not applicable</span>
+                              <span className="text-xs text-slate-400">প্রযোজ্য নয়</span>
                             )}
                           </td>
                           <td className="py-3 px-5 text-right">
@@ -941,7 +953,7 @@ export function SuperAdminPanel() {
                                   await deleteAdminUser(u.id);
                                   await loadAdminData();
                                 }}
-                                aria-label={`Delete user ${u.email}`}
+                                aria-label={`${u.email} মুছুন`}
                                 className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
                               >
                                 <Trash2 className="w-4 h-4" />

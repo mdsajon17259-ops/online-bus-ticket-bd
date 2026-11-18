@@ -26,7 +26,7 @@ interface AppContextValue {
 
 const DEFAULT_SETTINGS: AppSettings = {
   id: 1,
-  organization_name: 'Aurora Transit Network',
+  organization_name: 'বেঙ্গল ট্রানজিট নেটওয়ার্ক',
   organization_logo_url: '/src/assets/images/default_org_logo_1794840144839.jpg',
   updated_at: new Date().toISOString(),
 };
@@ -45,7 +45,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const data = await fetchAppSettings();
       if (data) {
         setSettings(data);
-        document.title = `${data.organization_name} — Bus Ticket Booking`;
+        document.title = `${data.organization_name} — বাস টিকেট বুকিং`;
       }
     } catch (err) {
       console.error('Failed to load dynamic branding settings:', err);

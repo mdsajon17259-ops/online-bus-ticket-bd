@@ -1,6 +1,6 @@
 {
   "name": "Aurora Transit Network",
-  "description": "Multi-Counter Bus Ticket Booking Platform with Dynamic Branding, Counter Operator Portal, and Super Admin Console.",
+  "description": "বাংলাদেশী মাল্টি-কাউন্টার বাস টিকেট বুকিং প্ল্যাটফর্ম — ডায়নামিক ব্র্যান্ডিং, কাউন্টার অপারেটর প্যানেল ও সুপার অ্যাডমিন কন্ট্রোল।",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

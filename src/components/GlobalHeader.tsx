@@ -8,10 +8,10 @@ export function GlobalHeader() {
   const [logoError, setLogoError] = useState(false);
 
   const navItems: Array<{ id: ActivePanel; label: string }> = [
-    { id: 'passenger', label: 'Book Tickets' },
-    { id: 'bookings', label: 'Check Booking' },
-    { id: 'operator', label: 'Counter Portal' },
-    { id: 'admin', label: 'Admin Console' },
+    { id: 'passenger', label: 'টিকেট বুকিং' },
+    { id: 'bookings', label: 'টিকেট যাচাই' },
+    { id: 'operator', label: 'কাউন্টার প্যানেল' },
+    { id: 'admin', label: 'অ্যাডমিন প্যানেল' },
   ];
 
   const handleNavigate = (panel: ActivePanel) => {
@@ -47,7 +47,7 @@ export function GlobalHeader() {
         </button>
 
         {/* Zone 2: 4 Concise Single-Line Navigation Links */}
-        <nav className="hidden md:flex items-center gap-6" aria-label="Primary navigation">
+        <nav className="hidden md:flex items-center gap-6" aria-label="প্রধান নেভিগেশন">
           {navItems.map((item) => {
             const isActive = activePanel === item.id;
             return (
@@ -81,7 +81,7 @@ export function GlobalHeader() {
               onClick={logout}
               className="hidden md:inline-flex items-center justify-center px-4 py-2 min-h-[40px] text-xs font-semibold text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700"
             >
-              Sign Out
+              লগআউট
             </button>
           ) : (
             <button
@@ -89,14 +89,14 @@ export function GlobalHeader() {
               onClick={() => handleNavigate('auth')}
               className="hidden md:inline-flex items-center justify-center px-4 py-2 min-h-[40px] text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded-lg transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700"
             >
-              Sign In
+              লগইন করুন
             </button>
           )}
 
           <button
             type="button"
             onClick={() => setMobileMenuOpen((prev) => !prev)}
-            aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+            aria-label={mobileMenuOpen ? 'মেনু বন্ধ করুন' : 'মেনু খুলুন'}
             aria-expanded={mobileMenuOpen}
             className="md:hidden min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-700 hover:text-slate-900 rounded-lg hover:bg-slate-100 transition-colors"
           >
@@ -137,7 +137,7 @@ export function GlobalHeader() {
                   }}
                   className="px-4 min-h-[44px] text-xs font-semibold text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg whitespace-nowrap shrink-0"
                 >
-                  Sign Out
+                  লগআউট
                 </button>
               </div>
             ) : (
@@ -146,7 +146,7 @@ export function GlobalHeader() {
                 onClick={() => handleNavigate('auth')}
                 className="w-full min-h-[44px] text-sm font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded-lg transition-colors"
               >
-                Sign In
+                লগইন করুন
               </button>
             )}
           </div>

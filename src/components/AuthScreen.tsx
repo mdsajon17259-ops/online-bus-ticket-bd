@@ -11,24 +11,36 @@ interface AuthScreenProps {
 
 const DEMO_ACCOUNTS = [
   {
-    label: 'Super Admin',
-    email: 'admin@auroratransit.com',
+    label: 'সুপার অ্যাডমিন (মাস্টার)',
+    email: 'admin@bengaltransit.bd',
     password: 'Admin123!',
-    hint: 'Full organization settings, counters, trips, and users',
+    hint: 'প্রতিষ্ঠানের ব্র্যান্ডিং, কাউন্টার, ট্রিপ ও ব্যবহারকারী নিয়ন্ত্রণ',
   },
   {
-    label: 'Aurora Central Operator',
-    email: 'central@auroratransit.com',
+    label: 'গ্রিন লাইন কাউন্টার অপারেটর',
+    email: 'greenline@bengaltransit.bd',
     password: 'Operator123!',
-    hint: 'Scoped to Aurora Central Terminal bookings & trips',
+    hint: 'শুধুমাত্র গ্রিন লাইন পরিবহনের বুকিং ও ট্রিপ ব্যবস্থাপনা',
   },
   {
-    label: 'Pacific Express Operator',
-    email: 'pacific@auroratransit.com',
+    label: 'হানিফ এন্টারপ্রাইজ অপারেটর',
+    email: 'hanif@bengaltransit.bd',
     password: 'Operator123!',
-    hint: 'Scoped to Pacific Express Counter bookings & trips',
+    hint: 'শুধুমাত্র হানিফ এন্টারপ্রাইজের বুকিং ও ট্রিপ ব্যবস্থাপনা',
+  },
+  {
+    label: 'সিলেট কেন্দ্রীয় টার্মিনাল অপারেটর',
+    email: 'sylhet@bengaltransit.bd',
+    password: 'Operator123!',
+    hint: 'শুধুমাত্র সিলেট কেন্দ্রীয় টার্মিনালের বুকিং ও ট্রিপ ব্যবস্থাপনা',
   },
 ];
+
+const ROLE_LABELS: Record<string, string> = {
+  super_admin: 'সুপার অ্যাডমিন',
+  counter_admin: 'কাউন্টার অপারেটর',
+  user: 'সাধারণ যাত্রী',
+};
 
 export function AuthScreen({
   requiredRole,
@@ -64,14 +76,18 @@ export function AuthScreen({
         setActivePanel('passenger');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Authentication failed');
+      setError(err instanceof Error ? err.message : 'লগইন সম্পন্ন করা যায়নি');
     } finally {
       setLoading(false);
     }
   };
 
-  // If already logged in but lacking requiredRole, show clear access control notice
-  if (user && requiredRole && user.role !== requiredRole && !(requiredRole === 'counter_admin' && user.role === 'super_admin')) {
+  if (
+    user &&
+    requiredRole &&
+    user.role !== requiredRole &&
+    !(requiredRole === 'counter_admin' && user.role === 'super_admin')
+  ) {
     return (
       <main className="max-w-lg mx-auto px-4 py-14">
         <div className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 space-y-4">
@@ -79,14 +95,14 @@ export function AuthScreen({
             <Lock className="w-5 h-5" />
           </div>
           <h1 className="font-display text-xl font-bold text-slate-900">
-            Restricted Access
+            সংরক্ষিত প্রবেশাধিকার
           </h1>
           <p className="text-sm text-slate-600 leading-relaxed">
-            You are currently signed in as <strong className="font-semibold text-slate-900">{user.email}</strong> ({user.role.replace('_', ' ')}). This panel requires{' '}
+            আপনি বর্তমানে <strong className="font-semibold text-slate-900">{user.email}</strong> ({ROLE_LABELS[user.role] || user.role}) হিসেবে লগইন করেছেন। এই প্যানেলে প্রবেশ করতে{' '}
             <strong className="font-semibold text-slate-900">
-              {requiredRole === 'super_admin' ? 'Super Admin' : 'Counter Operator'}
+              {requiredRole === 'super_admin' ? 'সুপার অ্যাডমিন' : 'কাউন্টার অপারেটর'}
             </strong>{' '}
-            privileges.
+            অ্যাকাউন্ট প্রয়োজন।
           </p>
           <div className="flex flex-wrap gap-3 pt-2">
             <button
@@ -94,14 +110,14 @@ export function AuthScreen({
               onClick={logout}
               className="min-h-[44px] px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold rounded-lg transition-colors"
             >
-              Sign Out & Switch Account
+              লগআউট করে অ্যাকাউন্ট পরিবর্তন করুন
             </button>
             <button
               type="button"
               onClick={() => setActivePanel('passenger')}
               className="min-h-[44px] px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-sm font-medium rounded-lg transition-colors"
             >
-              Return to Booking
+              টিকেট বুকিংয়ে ফিরে যান
             </button>
           </div>
         </div>
@@ -116,10 +132,10 @@ export function AuthScreen({
         <div className="md:col-span-7 bg-white border border-slate-200 rounded-xl p-6 sm:p-8">
           <div className="mb-6">
             <h1 className="font-display text-2xl font-bold text-slate-900">
-              {title || (mode === 'login' ? 'Sign In to Portal' : 'Create Passenger Account')}
+              {title || (mode === 'login' ? 'পোর্টালে লগইন করুন' : 'নতুন যাত্রী অ্যাকাউন্ট তৈরি করুন')}
             </h1>
             <p className="text-sm text-slate-600 mt-1">
-              {subtitle || 'Access passenger bookings, counter dispatch, or organization administration.'}
+              {subtitle || 'যাত্রী বুকিং, কাউন্টার ড্যাশবোর্ড অথবা অ্যাডমিন কনসোলে প্রবেশ করতে লগইন করুন।'}
             </p>
           </div>
 
@@ -135,7 +151,7 @@ export function AuthScreen({
                   mode === 'login' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Sign In
+                লগইন
               </button>
               <button
                 type="button"
@@ -147,7 +163,7 @@ export function AuthScreen({
                   mode === 'register' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Register Passenger
+                যাত্রী নিবন্ধন
               </button>
             </div>
           )}
@@ -156,7 +172,7 @@ export function AuthScreen({
             {mode === 'register' && (
               <div>
                 <label htmlFor="auth-name" className="block text-xs font-medium text-slate-600 mb-1.5">
-                  Full Name
+                  পূর্ণ নাম
                 </label>
                 <div className="relative">
                   <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
@@ -166,7 +182,7 @@ export function AuthScreen({
                     required
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
-                    placeholder="Jordan Vance"
+                    placeholder="নুসরাত জাহান"
                     className="w-full min-h-[44px] pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
                   />
                 </div>
@@ -175,7 +191,7 @@ export function AuthScreen({
 
             <div>
               <label htmlFor="auth-email" className="block text-xs font-medium text-slate-600 mb-1.5">
-                Email Address
+                ইমেইল ঠিকানা
               </label>
               <div className="relative">
                 <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
@@ -185,7 +201,7 @@ export function AuthScreen({
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="operator@auroratransit.com"
+                  placeholder="greenline@bengaltransit.bd"
                   className="w-full min-h-[44px] pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
                 />
               </div>
@@ -193,7 +209,7 @@ export function AuthScreen({
 
             <div>
               <label htmlFor="auth-password" className="block text-xs font-medium text-slate-600 mb-1.5">
-                Password
+                পাসওয়ার্ড
               </label>
               <div className="relative">
                 <KeyRound className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
@@ -220,7 +236,7 @@ export function AuthScreen({
               disabled={loading}
               className="w-full min-h-[44px] px-5 py-2.5 bg-blue-700 hover:bg-blue-800 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors"
             >
-              {loading ? 'Authenticating...' : mode === 'login' ? 'Sign In' : 'Create Account'}
+              {loading ? 'যাচাই করা হচ্ছে...' : mode === 'login' ? 'লগইন করুন' : 'অ্যাকাউন্ট তৈরি করুন'}
             </button>
           </form>
         </div>
@@ -229,10 +245,10 @@ export function AuthScreen({
         <aside className="md:col-span-5 bg-white border border-slate-200 rounded-xl p-6 space-y-4">
           <div>
             <h2 className="font-display text-base font-semibold text-slate-900">
-              Role Access Directory
+              ডেমো অ্যাকাউন্ট তালিকা
             </h2>
             <p className="text-xs text-slate-500 mt-1">
-              Click any credential set below to test strict role-based access control.
+              বিভিন্ন রোল ও কাউন্টার অ্যাক্সেস পরীক্ষা করতে নিচের যেকোনো অ্যাকাউন্টে ক্লিক করুন।
             </p>
           </div>
 
@@ -251,7 +267,7 @@ export function AuthScreen({
                     }}
                     className="text-xs font-semibold text-blue-700 hover:underline whitespace-nowrap shrink-0"
                   >
-                    Fill Credentials
+                    তথ্য পূরণ করুন
                   </button>
                 </div>
                 <p className="text-xs text-slate-500 mt-0.5">{acc.hint}</p>
