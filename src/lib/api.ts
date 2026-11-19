@@ -46,7 +46,7 @@ async function apiFetch<T>(url: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(url, { ...options, headers });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error((data as { error?: string }).error || `Request failed (${res.status})`);
+    throw new Error((data as { error?: string }).error || `অনুরোধ ব্যর্থ হয়েছে (${res.status})`);
   }
   return data as T;
 }
@@ -119,10 +119,10 @@ export async function fetchTrips(filters?: {
         route_from: String(row.route_from),
         route_to: String(row.route_to),
         departure_time: String(row.departure_time),
-        bus_type: String(row.bus_type || 'AC Express Coach'),
+        bus_type: String(row.bus_type || 'এসি এক্সপ্রেস কোচ'),
         price: Number(row.price),
         total_seats: Number(row.total_seats),
-        counter_name: c?.counter_name || 'Counter',
+        counter_name: c?.counter_name || 'কাউন্টার',
         counter_logo_url: c?.logo_url || '',
         available_seats: seatList.filter((s) => s.status === 'available').length,
       };
@@ -180,6 +180,20 @@ export async function createBooking(payload: {
   });
 }
 
+export async function fetchMyBookings(): Promise<Booking[]> {
+  if (isSupabaseConfigured && supabase) {
+    const { data: userData } = await supabase.auth.getUser();
+    if (!userData.user) return [];
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('*, trips(route_from, route_to, departure_time, bus_type, price, counter_id, counters(counter_name))')
+      .order('created_at', { ascending: false });
+    if (error) throw new Error(error.message);
+    return (data || []).map(mapSupabaseBooking);
+  }
+  return apiFetch<Booking[]>('/api/bookings/my');
+}
+
 export async function lookupBookings(query: string): Promise<Booking[]> {
   if (isSupabaseConfigured && supabase) {
     const clean = query.trim();
@@ -198,17 +212,17 @@ export async function lookupBookings(query: string): Promise<Booking[]> {
 // AUTHENTICATION
 // =============================================================================
 
-export async function loginWithEmail(
-  email: string,
+export async function loginWithIdentifier(
+  identifier: string,
   password: string
 ): Promise<{ user: Profile }> {
   if (isSupabaseConfigured && supabase) {
     const { data: authData, error } = await supabase.auth.signInWithPassword({
-      email,
+      email: identifier,
       password,
     });
     if (error || !authData.user) {
-      throw new Error(error?.message || 'Sign in failed');
+      throw new Error(error?.message || 'লগইন সম্পন্ন হয়নি');
     }
     const { data: profile, error: profErr } = await supabase
       .from('profiles')
@@ -216,7 +230,7 @@ export async function loginWithEmail(
       .eq('id', authData.user.id)
       .single();
     if (profErr || !profile) {
-      throw new Error('User profile not found in database');
+      throw new Error('ব্যবহারকারীর প্রোফাইল পাওয়া যায়নি');
     }
     return {
       user: {
@@ -231,27 +245,29 @@ export async function loginWithEmail(
 
   const res = await apiFetch<{ token: string; user: Profile }>('/api/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email: identifier, password }),
   });
   setAuthToken(res.token);
   return { user: res.user };
 }
 
-export async function registerPassenger(
-  email: string,
-  password: string,
-  full_name: string
-): Promise<{ user: Profile }> {
+export async function registerPassenger(payload: {
+  full_name: string;
+  phone: string;
+  password: string;
+  email?: string;
+}): Promise<{ user: Profile }> {
   if (isSupabaseConfigured && supabase) {
+    const emailToUse = payload.email?.trim() || `${payload.phone.replace(/\D/g, '')}@passenger.deshtravels.bd`;
     const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { full_name } },
+      email: emailToUse,
+      password: payload.password,
+      options: { data: { full_name: payload.full_name, phone: payload.phone } },
     });
-    if (error || !data.user) throw new Error(error?.message || 'Registration failed');
+    if (error || !data.user) throw new Error(error?.message || 'নিবন্ধন সম্পন্ন হয়নি');
     const { error: profErr } = await supabase.from('profiles').insert({
       id: data.user.id,
-      email,
+      email: emailToUse,
       role: 'user',
       counter_id: null,
     });
@@ -259,8 +275,9 @@ export async function registerPassenger(
     return {
       user: {
         id: data.user.id,
-        email,
-        full_name,
+        email: emailToUse,
+        full_name: payload.full_name,
+        phone: payload.phone,
         role: 'user',
         counter_id: null,
       },
@@ -269,7 +286,7 @@ export async function registerPassenger(
 
   const res = await apiFetch<{ token: string; user: Profile }>('/api/auth/register', {
     method: 'POST',
-    body: JSON.stringify({ email, password, full_name }),
+    body: JSON.stringify(payload),
   });
   setAuthToken(res.token);
   return { user: res.user };
@@ -350,7 +367,7 @@ export async function updateBookingStatus(
       .select('*')
       .eq('id', bookingId)
       .single();
-    if (fetchErr || !booking) throw new Error(fetchErr?.message || 'Booking not found');
+    if (fetchErr || !booking) throw new Error(fetchErr?.message || 'বুকিং পাওয়া যায়নি');
 
     const seats = booking.selected_seats as string[];
     if (status === 'cancelled' && booking.status !== 'cancelled') {
@@ -469,16 +486,45 @@ export async function fetchAdminOverview(): Promise<AdminOverview> {
   return apiFetch<AdminOverview>('/api/admin/overview');
 }
 
+export async function fetchAdminBookings(): Promise<Booking[]> {
+  return fetchOperatorBookings();
+}
+
 export async function createCounter(payload: {
   counter_name: string;
   phone: string;
   address: string;
   logo_url: string;
+  operator_username: string;
+  operator_password: string;
 }): Promise<Counter> {
   if (isSupabaseConfigured && supabase) {
-    const { data, error } = await supabase.from('counters').insert(payload).select().single();
+    const { data, error } = await supabase
+      .from('counters')
+      .insert({
+        counter_name: payload.counter_name,
+        phone: payload.phone,
+        address: payload.address,
+        logo_url: payload.logo_url,
+      })
+      .select()
+      .single();
     if (error) throw new Error(error.message);
-    return data as Counter;
+    const createdCounter = data as Counter;
+
+    const { data: opAuth, error: opAuthErr } = await supabase.auth.signUp({
+      email: payload.operator_username,
+      password: payload.operator_password,
+    });
+    if (!opAuthErr && opAuth.user) {
+      await supabase.from('profiles').insert({
+        id: opAuth.user.id,
+        email: payload.operator_username,
+        role: 'counter_admin',
+        counter_id: createdCounter.id,
+      });
+    }
+    return createdCounter;
   }
   return apiFetch<Counter>('/api/admin/counters', {
     method: 'POST',
@@ -546,6 +592,7 @@ export async function fetchAllUsers(): Promise<Profile[]> {
 export async function createAdminUser(payload: {
   email: string;
   full_name: string;
+  phone?: string;
   password: string;
   role: UserRole;
   counter_id: string | null;
@@ -555,7 +602,7 @@ export async function createAdminUser(payload: {
       email: payload.email,
       password: payload.password,
     });
-    if (error || !data.user) throw new Error(error?.message || 'Unable to create user');
+    if (error || !data.user) throw new Error(error?.message || 'ব্যবহারকারী তৈরি করা যায়নি');
     const { data: profile, error: profErr } = await supabase
       .from('profiles')
       .insert({
@@ -578,7 +625,8 @@ export async function createAdminUser(payload: {
 export async function updateUserRole(
   id: string,
   role: UserRole,
-  counter_id: string | null
+  counter_id: string | null,
+  new_password?: string
 ): Promise<Profile> {
   if (isSupabaseConfigured && supabase) {
     const { data, error } = await supabase
@@ -595,7 +643,7 @@ export async function updateUserRole(
   }
   return apiFetch<Profile>(`/api/admin/users/${encodeURIComponent(id)}`, {
     method: 'PATCH',
-    body: JSON.stringify({ role, counter_id }),
+    body: JSON.stringify({ role, counter_id, password: new_password }),
   });
 }
 
@@ -636,10 +684,10 @@ function mapSupabaseBooking(row: Record<string, unknown>): Booking {
           route_from: trip.route_from || '',
           route_to: trip.route_to || '',
           departure_time: trip.departure_time || '',
-          bus_type: trip.bus_type || 'AC Express Coach',
+          bus_type: trip.bus_type || 'এসি এক্সপ্রেস কোচ',
           price: Number(trip.price || 0),
           counter_id: trip.counter_id || '',
-          counter_name: trip.counters?.counter_name || 'Counter',
+          counter_name: trip.counters?.counter_name || 'কাউন্টার',
         }
       : undefined,
   };

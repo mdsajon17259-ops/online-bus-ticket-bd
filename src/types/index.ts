@@ -15,6 +15,7 @@ export interface Profile {
   id: string;
   email: string;
   full_name?: string;
+  phone?: string;
   role: UserRole;
   counter_id: string | null;
   counter_name?: string | null;
@@ -55,6 +56,7 @@ export interface Seat {
 export interface Booking {
   id: string;
   trip_id: string;
+  user_id?: string | null;
   passenger_name: string;
   phone: string;
   boarding_point: string;

@@ -9,7 +9,7 @@ create extension if not exists "pgcrypto";
 -- 1. APP SETTINGS TABLE (Dynamic Branding)
 create table if not exists public.app_settings (
   id integer primary key default 1,
-  organization_name text not null default 'বেঙ্গল ট্রানজিট নেটওয়ার্ক',
+  organization_name text not null default 'দেশ ভ্রমণ / Desh Travels',
   organization_logo_url text not null default '',
   updated_at timestamptz not null default now(),
   constraint single_settings_row check (id = 1)

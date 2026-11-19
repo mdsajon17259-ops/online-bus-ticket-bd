@@ -34,21 +34,26 @@ export function CounterOperatorPanel() {
   const [inspectSeats, setInspectSeats] = useState<Seat[]>([]);
   const [loadingSeats, setLoadingSeats] = useState(false);
 
-  const hasAccess = user && (user.role === 'counter_admin' || user.role === 'super_admin');
+  const isMasterSuperAdmin = user?.role === 'super_admin' && user?.email === 'Sajonvip';
+  const hasAccess = Boolean(
+    user && ((user.role === 'counter_admin' && user.counter_id) || isMasterSuperAdmin)
+  );
 
   const loadData = useCallback(async () => {
-    if (!hasAccess) return;
+    if (!hasAccess || !user) return;
     setLoading(true);
     setError('');
     try {
-      const counterParam = user?.role === 'super_admin' ? selectedAdminCounter || undefined : undefined;
+      const counterParam = isMasterSuperAdmin
+        ? selectedAdminCounter || undefined
+        : user.counter_id || undefined;
       const [bData, tData] = await Promise.all([
         fetchOperatorBookings(counterParam),
         fetchOperatorTrips(counterParam),
       ]);
       setBookings(bData);
       setTrips(tData);
-      if (user?.role === 'super_admin') {
+      if (isMasterSuperAdmin) {
         const cData = await fetchCounters();
         setCounters(cData);
       }
@@ -57,7 +62,7 @@ export function CounterOperatorPanel() {
     } finally {
       setLoading(false);
     }
-  }, [hasAccess, user?.role, selectedAdminCounter]);
+  }, [hasAccess, user, isMasterSuperAdmin, selectedAdminCounter]);
 
   useEffect(() => {
     loadData();
@@ -133,12 +138,11 @@ export function CounterOperatorPanel() {
     );
   }
 
-  const counterTitle =
-    user.role === 'super_admin'
-      ? selectedAdminCounter
-        ? counters.find((c) => c.id === selectedAdminCounter)?.counter_name || 'নির্বাচিত কাউন্টার'
-        : 'সকল কাউন্টার (অ্যাডমিন ভিউ)'
-      : user.counter_name || 'নির্ধারিত কাউন্টার';
+  const counterTitle = isMasterSuperAdmin
+    ? selectedAdminCounter
+      ? counters.find((c) => c.id === selectedAdminCounter)?.counter_name || 'নির্বাচিত কাউন্টার'
+      : 'সকল কাউন্টার (অ্যাডমিন ভিউ)'
+    : user?.counter_name || 'নির্ধারিত কাউন্টার';
 
   const filterLabels: Record<'all' | BookingStatus, string> = {
     all: 'সবগুলো',
@@ -152,17 +156,22 @@ export function CounterOperatorPanel() {
       {/* Top Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-5">
         <div>
-          <p className="text-xs font-semibold text-blue-700">কাউন্টার অপারেটর ড্যাশবোর্ড</p>
+          <p className="text-xs font-semibold text-blue-700">
+            {isMasterSuperAdmin ? 'কাউন্টার পরিচালনা (সুপার অ্যাডমিন)' : 'নির্ধারিত কাউন্টার অপারেটর প্যানেল'}
+          </p>
           <h1 className="font-display text-2xl sm:text-3xl font-bold text-slate-900 mt-0.5">
             {counterTitle}
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            লগইনকৃত অ্যাকাউন্ট: {user.email} · শুধুমাত্র আপনার কাউন্টারের ট্রিপ ও বুকিং দৃশ্যমান
+            ইউজারনেম: <strong className="font-mono text-slate-700">{user?.email}</strong> ·{' '}
+            {isMasterSuperAdmin
+              ? 'সব কাউন্টার পর্যবেক্ষণ অনুমোদিত'
+              : 'আপনার সেশন শুধুমাত্র এই কাউন্টারের ট্রিপ, আসন ও বুকিংয়ে সীমাবদ্ধ'}
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {user.role === 'super_admin' && (
+          {isMasterSuperAdmin && (
             <select
               aria-label="কাউন্টার অনুযায়ী ফিল্টার করুন"
               value={selectedAdminCounter}

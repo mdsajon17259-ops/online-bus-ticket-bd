@@ -9,7 +9,9 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const PORT = Number(process.env.PORT) || 3000;
-const SESSION_SECRET = process.env.SESSION_SECRET || 'aurora-transit-local-session-secret-key';
+const SESSION_SECRET = process.env.SESSION_SECRET || 'desh-travels-session-secret-key';
+const MASTER_ADMIN_USERNAME = 'Sajonvip';
+const MASTER_ADMIN_PASSWORD = 'Sajon2001M';
 
 interface AuthUser {
   id: string;
@@ -54,6 +56,7 @@ db.exec(`
     id TEXT PRIMARY KEY,
     email TEXT NOT NULL UNIQUE,
     full_name TEXT NOT NULL DEFAULT '',
+    phone TEXT NOT NULL DEFAULT '',
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'counter_admin', 'super_admin')),
     counter_id TEXT REFERENCES counters(id) ON DELETE SET NULL,
@@ -66,7 +69,7 @@ db.exec(`
     route_from TEXT NOT NULL,
     route_to TEXT NOT NULL,
     departure_time TEXT NOT NULL,
-    bus_type TEXT NOT NULL DEFAULT 'AC Express Coach',
+    bus_type TEXT NOT NULL DEFAULT 'এসি এক্সপ্রেস কোচ',
     price REAL NOT NULL,
     total_seats INTEGER NOT NULL DEFAULT 36,
     created_at TEXT NOT NULL
@@ -83,6 +86,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS bookings (
     id TEXT PRIMARY KEY,
     trip_id TEXT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    user_id TEXT DEFAULT NULL,
     passenger_name TEXT NOT NULL,
     phone TEXT NOT NULL,
     boarding_point TEXT NOT NULL DEFAULT '',
@@ -92,6 +96,16 @@ db.exec(`
     created_at TEXT NOT NULL
   );
 `);
+
+// Safely add new columns if upgrading an existing SQLite database
+const profileCols = db.prepare('PRAGMA table_info(profiles)').all() as Array<{ name: string }>;
+if (!profileCols.some((c) => c.name === 'phone')) {
+  db.exec("ALTER TABLE profiles ADD COLUMN phone TEXT NOT NULL DEFAULT ''");
+}
+const bookingCols = db.prepare('PRAGMA table_info(bookings)').all() as Array<{ name: string }>;
+if (!bookingCols.some((c) => c.name === 'user_id')) {
+  db.exec('ALTER TABLE bookings ADD COLUMN user_id TEXT DEFAULT NULL');
+}
 
 function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -151,6 +165,35 @@ function generateSeatsForTrip(tripId: string, totalSeats: number) {
 function seedDatabaseIfEmpty() {
   const existing = db.prepare('SELECT id FROM app_settings WHERE id = 1').get();
   const hasOldUsSeed = db.prepare("SELECT id FROM counters WHERE id = 'c-aurora-central'").get();
+  const hasOldAdmin = db.prepare("SELECT id FROM profiles WHERE email = 'admin@bengaltransit.bd'").get();
+
+  // Upgrade old admin@bengaltransit.bd seed to Master Super Admin (Sajonvip) + Desh Travels branding
+  if (existing && !hasOldUsSeed && hasOldAdmin) {
+    db.transaction(() => {
+      db.prepare("DELETE FROM profiles WHERE role = 'super_admin'").run();
+      db.prepare(
+        'INSERT OR REPLACE INTO profiles (id, email, full_name, phone, password_hash, role, counter_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(
+        'u-master-super-admin',
+        MASTER_ADMIN_USERNAME,
+        'মাস্টার সুপার অ্যাডমিন',
+        '',
+        hashPassword(MASTER_ADMIN_PASSWORD),
+        'super_admin',
+        null,
+        new Date().toISOString()
+      );
+      db.prepare(
+        "UPDATE app_settings SET organization_name = 'দেশ ভ্রমণ / Desh Travels' WHERE id = 1 AND organization_name = 'বেঙ্গল ট্রানজিট নেটওয়ার্ক'"
+      ).run();
+      // Update operator identifiers to clean usernames
+      db.prepare("UPDATE profiles SET email = 'greenline' WHERE id = 'u-op-greenline'").run();
+      db.prepare("UPDATE profiles SET email = 'hanif' WHERE id = 'u-op-hanif'").run();
+      db.prepare("UPDATE profiles SET email = 'shyamoli' WHERE id = 'u-op-shyamoli'").run();
+      db.prepare("UPDATE profiles SET email = 'sylhet' WHERE id = 'u-op-sylhet'").run();
+    })();
+    return;
+  }
 
   if (existing && !hasOldUsSeed) return;
 
@@ -167,7 +210,7 @@ function seedDatabaseIfEmpty() {
 
     db.prepare(
       'INSERT INTO app_settings (id, organization_name, organization_logo_url, updated_at) VALUES (1, ?, ?, ?)'
-    ).run('বেঙ্গল ট্রানজিট নেটওয়ার্ক', '/src/assets/images/default_org_logo_1794840144839.jpg', now);
+    ).run('দেশ ভ্রমণ / Desh Travels', '/src/assets/images/default_org_logo_1794840144839.jpg', now);
 
     const c1 = 'c-green-line';
     const c2 = 'c-hanif-enterprise';
@@ -211,21 +254,23 @@ function seedDatabaseIfEmpty() {
     );
 
     const insertProfile = db.prepare(
-      'INSERT INTO profiles (id, email, full_name, password_hash, role, counter_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO profiles (id, email, full_name, phone, password_hash, role, counter_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     );
     insertProfile.run(
-      'u-super-admin',
-      'admin@bengaltransit.bd',
-      'তানভীর আহমেদ (সুপার অ্যাডমিন)',
-      hashPassword('Admin123!'),
+      'u-master-super-admin',
+      MASTER_ADMIN_USERNAME,
+      'মাস্টার সুপার অ্যাডমিন',
+      '',
+      hashPassword(MASTER_ADMIN_PASSWORD),
       'super_admin',
       null,
       now
     );
     insertProfile.run(
       'u-op-greenline',
-      'greenline@bengaltransit.bd',
+      'greenline',
       'কামরুল হাসান',
+      '01711-004422',
       hashPassword('Operator123!'),
       'counter_admin',
       c1,
@@ -233,8 +278,9 @@ function seedDatabaseIfEmpty() {
     );
     insertProfile.run(
       'u-op-hanif',
-      'hanif@bengaltransit.bd',
+      'hanif',
       'রফিকুল ইসলাম',
+      '01713-402671',
       hashPassword('Operator123!'),
       'counter_admin',
       c2,
@@ -242,8 +288,9 @@ function seedDatabaseIfEmpty() {
     );
     insertProfile.run(
       'u-op-shyamoli',
-      'shyamoli@bengaltransit.bd',
+      'shyamoli',
       'সাজ্জাদ হোসেন',
+      '01819-225588',
       hashPassword('Operator123!'),
       'counter_admin',
       c3,
@@ -251,8 +298,9 @@ function seedDatabaseIfEmpty() {
     );
     insertProfile.run(
       'u-op-sylhet',
-      'sylhet@bengaltransit.bd',
+      'sylhet',
       'মাহবুব আলম',
+      '01712-889911',
       hashPassword('Operator123!'),
       'counter_admin',
       c4,
@@ -260,9 +308,10 @@ function seedDatabaseIfEmpty() {
     );
     insertProfile.run(
       'u-passenger',
-      'passenger@bengaltransit.bd',
-      'নুসরাত জাহান',
-      hashPassword('User123!'),
+      '01711223344',
+      'রাশেদুল করিম',
+      '01711223344',
+      hashPassword('1234'),
       'user',
       null,
       now
@@ -354,11 +403,11 @@ function requireAuth(req: AuthedRequest, res: Response, next: NextFunction) {
 
 function requireSuperAdmin(req: AuthedRequest, res: Response, next: NextFunction) {
   if (!req.user) {
-    res.status(401).json({ error: 'Authentication required' });
+    res.status(401).json({ error: 'লগইন করা প্রয়োজন' });
     return;
   }
-  if (req.user.role !== 'super_admin') {
-    res.status(403).json({ error: 'Forbidden: Super Admin access required' });
+  if (req.user.role !== 'super_admin' || req.user.email !== MASTER_ADMIN_USERNAME) {
+    res.status(403).json({ error: 'অনুমোদিত নয়: শুধুমাত্র মাস্টার সুপার অ্যাডমিন প্রবেশ করতে পারবেন' });
     return;
   }
   next();
@@ -442,7 +491,7 @@ async function startServer() {
     res.json(seats);
   });
 
-  app.post('/api/bookings', (req, res) => {
+  app.post('/api/bookings', requireAuth, (req: AuthedRequest, res) => {
     const { trip_id, passenger_name, phone, boarding_point, selected_seats } = req.body as {
       trip_id?: string;
       passenger_name?: string;
@@ -452,7 +501,7 @@ async function startServer() {
     };
 
     if (!trip_id || !passenger_name?.trim() || !phone?.trim() || !Array.isArray(selected_seats) || selected_seats.length === 0) {
-      res.status(400).json({ error: 'Trip, passenger name, phone, and at least one seat are required' });
+      res.status(400).json({ error: 'ট্রিপ, যাত্রীর নাম, মোবাইল নম্বর এবং কমপক্ষে একটি আসন প্রয়োজন' });
       return;
     }
 
@@ -489,10 +538,11 @@ async function startServer() {
         const now = new Date().toISOString();
 
         db.prepare(
-          'INSERT INTO bookings (id, trip_id, passenger_name, phone, boarding_point, selected_seats, total_fare, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+          'INSERT INTO bookings (id, trip_id, user_id, passenger_name, phone, boarding_point, selected_seats, total_fare, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         ).run(
           bookingId,
           trip_id,
+          req.user!.id,
           passenger_name.trim(),
           phone.trim(),
           (boarding_point || '').trim(),
@@ -505,6 +555,7 @@ async function startServer() {
         return {
           id: bookingId,
           trip_id,
+          user_id: req.user!.id,
           passenger_name: passenger_name.trim(),
           phone: phone.trim(),
           boarding_point: (boarding_point || '').trim(),
@@ -581,28 +632,97 @@ async function startServer() {
     );
   });
 
+  app.get('/api/bookings/my', requireAuth, (req: AuthedRequest, res) => {
+    const profile = db
+      .prepare('SELECT id, phone FROM profiles WHERE id = ?')
+      .get(req.user!.id) as { id: string; phone: string } | undefined;
+
+    const cleanPhone = (profile?.phone || '').replace(/[\s-]/g, '');
+    const rows = db
+      .prepare(`
+        SELECT b.*, t.route_from, t.route_to, t.departure_time, t.bus_type, t.price, t.counter_id, c.counter_name
+        FROM bookings b
+        JOIN trips t ON t.id = b.trip_id
+        JOIN counters c ON c.id = t.counter_id
+        WHERE b.user_id = ? OR (? != '' AND replace(replace(b.phone, '-', ''), ' ', '') = ?)
+        ORDER BY b.created_at DESC
+      `)
+      .all(req.user!.id, cleanPhone, cleanPhone) as Array<Record<string, unknown>>;
+
+    res.json(
+      rows.map((r) => ({
+        id: r.id,
+        trip_id: r.trip_id,
+        user_id: r.user_id,
+        passenger_name: r.passenger_name,
+        phone: r.phone,
+        boarding_point: r.boarding_point,
+        selected_seats: JSON.parse(String(r.selected_seats)),
+        total_fare: r.total_fare,
+        status: r.status,
+        created_at: r.created_at,
+        trip: {
+          route_from: r.route_from,
+          route_to: r.route_to,
+          departure_time: r.departure_time,
+          bus_type: r.bus_type,
+          price: r.price,
+          counter_id: r.counter_id,
+          counter_name: r.counter_name,
+        },
+      }))
+    );
+  });
+
   // ===========================================================================
   // AUTHENTICATION ENDPOINTS
   // ===========================================================================
 
   app.post('/api/auth/login', (req, res) => {
     const { email, password } = req.body as { email?: string; password?: string };
-    if (!email || !password) {
-      res.status(400).json({ error: 'Email and password are required' });
+    const identifier = (email || '').trim();
+    if (!identifier || !password) {
+      res.status(400).json({ error: 'ইউজারনেম/মোবাইল নম্বর এবং পাসওয়ার্ড দিন' });
       return;
     }
 
+    // Strict hardcoded check for Master Super Admin
+    if (identifier === MASTER_ADMIN_USERNAME) {
+      if (password !== MASTER_ADMIN_PASSWORD) {
+        res.status(401).json({ error: 'ভুল ইউজারনেম বা পাসওয়ার্ড' });
+        return;
+      }
+      const masterUser: AuthUser = {
+        id: 'u-master-super-admin',
+        email: MASTER_ADMIN_USERNAME,
+        role: 'super_admin',
+        counter_id: null,
+      };
+      res.json({
+        token: signToken(masterUser),
+        user: {
+          ...masterUser,
+          full_name: 'মাস্টার সুপার অ্যাডমিন',
+          phone: '',
+          counter_name: null,
+        },
+      });
+      return;
+    }
+
+    const cleanPhone = identifier.replace(/[\s-]/g, '');
     const row = db
       .prepare(`
         SELECT p.*, c.counter_name
         FROM profiles p
         LEFT JOIN counters c ON c.id = p.counter_id
-        WHERE LOWER(p.email) = LOWER(?)
+        WHERE p.role != 'super_admin'
+          AND (LOWER(p.email) = LOWER(?) OR (p.phone != '' AND replace(replace(p.phone, '-', ''), ' ', '') = ?))
       `)
-      .get(email.trim()) as (AuthUser & { password_hash: string; full_name: string; counter_name: string | null }) | undefined;
+      .get(identifier, cleanPhone) as (AuthUser & { password_hash: string; full_name: string; phone: string; counter_name: string | null }) | undefined;
 
     if (!row || !verifyPassword(password, row.password_hash)) {
-      res.status(401).json({ error: 'Invalid email or password' });
+      res.status(401).json({ error: 'ভুল ইউজারনেম বা পাসওয়ার্ড' });
       return;
     }
 
@@ -620,6 +740,7 @@ async function startServer() {
         id: row.id,
         email: row.email,
         full_name: row.full_name,
+        phone: row.phone,
         role: row.role,
         counter_id: row.counter_id,
         counter_name: row.counter_name,
@@ -628,27 +749,46 @@ async function startServer() {
   });
 
   app.post('/api/auth/register', (req, res) => {
-    const { email, password, full_name } = req.body as { email?: string; password?: string; full_name?: string };
-    if (!email?.trim() || !password || password.length < 6) {
-      res.status(400).json({ error: 'Valid email and password (min 6 characters) are required' });
+    const { email, password, full_name, phone } = req.body as {
+      email?: string;
+      password?: string;
+      full_name?: string;
+      phone?: string;
+    };
+    const cleanName = (full_name || '').trim();
+    const cleanPhone = (phone || '').trim();
+    const normalizedPhone = cleanPhone.replace(/[\s-]/g, '');
+    const identifier = (email || '').trim().toLowerCase() || normalizedPhone;
+
+    if (!cleanName || !cleanPhone || !password || password.length < 4) {
+      res.status(400).json({ error: 'পূর্ণ নাম, মোবাইল নম্বর এবং কমপক্ষে ৪ অক্ষরের পাসওয়ার্ড দিন' });
       return;
     }
 
-    const existing = db.prepare('SELECT id FROM profiles WHERE LOWER(email) = LOWER(?)').get(email.trim());
+    if (identifier.toLowerCase() === MASTER_ADMIN_USERNAME.toLowerCase()) {
+      res.status(409).json({ error: 'এই ইউজারনেমটি সংরক্ষিত' });
+      return;
+    }
+
+    const existing = db
+      .prepare(
+        "SELECT id FROM profiles WHERE LOWER(email) = LOWER(?) OR (phone != '' AND replace(replace(phone, '-', ''), ' ', '') = ?)"
+      )
+      .get(identifier, normalizedPhone);
     if (existing) {
-      res.status(409).json({ error: 'An account with this email already exists' });
+      res.status(409).json({ error: 'এই মোবাইল নম্বর বা ইমেইল দিয়ে ইতিমধ্যে অ্যাকাউন্ট রয়েছে। অনুগ্রহ করে লগইন করুন।' });
       return;
     }
 
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     db.prepare(
-      'INSERT INTO profiles (id, email, full_name, password_hash, role, counter_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).run(id, email.trim().toLowerCase(), (full_name || '').trim(), hashPassword(password), 'user', null, now);
+      'INSERT INTO profiles (id, email, full_name, phone, password_hash, role, counter_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(id, identifier, cleanName, cleanPhone, hashPassword(password), 'user', null, now);
 
     const authUser: AuthUser = {
       id,
-      email: email.trim().toLowerCase(),
+      email: identifier,
       role: 'user',
       counter_id: null,
     };
@@ -657,7 +797,8 @@ async function startServer() {
       token: signToken(authUser),
       user: {
         ...authUser,
-        full_name: (full_name || '').trim(),
+        full_name: cleanName,
+        phone: cleanPhone,
         counter_name: null,
       },
     });
@@ -666,7 +807,7 @@ async function startServer() {
   app.get('/api/auth/me', requireAuth, (req: AuthedRequest, res) => {
     const row = db
       .prepare(`
-        SELECT p.id, p.email, p.full_name, p.role, p.counter_id, p.created_at, c.counter_name
+        SELECT p.id, p.email, p.full_name, p.phone, p.role, p.counter_id, p.created_at, c.counter_name
         FROM profiles p
         LEFT JOIN counters c ON c.id = p.counter_id
         WHERE p.id = ?
@@ -680,10 +821,15 @@ async function startServer() {
   // ===========================================================================
 
   app.get('/api/operator/trips', requireOperatorOrAdmin, (req: AuthedRequest, res) => {
-    const targetCounterId =
-      req.user!.role === 'super_admin' && typeof req.query.counter_id === 'string' && req.query.counter_id
-        ? req.query.counter_id
-        : req.user!.counter_id;
+    const isAdmin = req.user!.role === 'super_admin' && req.user!.email === MASTER_ADMIN_USERNAME;
+    const targetCounterId = isAdmin
+      ? (typeof req.query.counter_id === 'string' && req.query.counter_id ? req.query.counter_id : null)
+      : req.user!.counter_id;
+
+    if (!isAdmin && !targetCounterId) {
+      res.status(403).json({ error: 'এই অপারেটর অ্যাকাউন্টের সাথে কোনো কাউন্টার যুক্ত নেই' });
+      return;
+    }
 
     let sql = `
       SELECT t.*, c.counter_name, c.logo_url AS counter_logo_url,
@@ -702,10 +848,15 @@ async function startServer() {
   });
 
   app.get('/api/operator/bookings', requireOperatorOrAdmin, (req: AuthedRequest, res) => {
-    const targetCounterId =
-      req.user!.role === 'super_admin'
-        ? (typeof req.query.counter_id === 'string' && req.query.counter_id ? req.query.counter_id : null)
-        : req.user!.counter_id;
+    const isAdmin = req.user!.role === 'super_admin' && req.user!.email === MASTER_ADMIN_USERNAME;
+    const targetCounterId = isAdmin
+      ? (typeof req.query.counter_id === 'string' && req.query.counter_id ? req.query.counter_id : null)
+      : req.user!.counter_id;
+
+    if (!isAdmin && !targetCounterId) {
+      res.status(403).json({ error: 'এই অপারেটর অ্যাকাউন্টের সাথে কোনো কাউন্টার যুক্ত নেই' });
+      return;
+    }
 
     let sql = `
       SELECT b.*, t.route_from, t.route_to, t.departure_time, t.bus_type, t.price, t.counter_id, c.counter_name
@@ -877,22 +1028,73 @@ async function startServer() {
   });
 
   app.post('/api/admin/counters', requireSuperAdmin, (req, res) => {
-    const { counter_name, phone, address, logo_url } = req.body as {
+    const {
+      counter_name,
+      phone,
+      address,
+      logo_url,
+      operator_username,
+      operator_password,
+    } = req.body as {
       counter_name?: string;
       phone?: string;
       address?: string;
       logo_url?: string;
+      operator_username?: string;
+      operator_password?: string;
     };
-    if (!counter_name?.trim() || !phone?.trim() || !address?.trim()) {
-      res.status(400).json({ error: 'Counter name, phone, and address are required' });
+
+    const cleanName = (counter_name || '').trim();
+    const cleanPhone = (phone || '').trim();
+    const cleanAddress = (address || '').trim();
+    const cleanUsername = (operator_username || '').trim();
+    const cleanPassword = operator_password || '';
+
+    if (!cleanName || !cleanPhone || !cleanAddress) {
+      res.status(400).json({ error: 'কাউন্টারের নাম, মোবাইল নম্বর এবং ঠিকানা আবশ্যক' });
+      return;
+    }
+
+    if (!cleanUsername || cleanPassword.length < 4) {
+      res.status(400).json({ error: 'কাউন্টারের জন্য ইউজারনেম এবং কমপক্ষে ৪ অক্ষরের পাসওয়ার্ড নির্ধারণ করুন' });
+      return;
+    }
+
+    if (cleanUsername.toLowerCase() === MASTER_ADMIN_USERNAME.toLowerCase()) {
+      res.status(409).json({ error: 'এই ইউজারনেমটি মাস্টার সুপার অ্যাডমিনের জন্য সংরক্ষিত' });
+      return;
+    }
+
+    const existingUser = db
+      .prepare('SELECT id FROM profiles WHERE LOWER(email) = LOWER(?)')
+      .get(cleanUsername);
+    if (existingUser) {
+      res.status(409).json({ error: 'এই কাউন্টার ইউজারনেমটি ইতিমধ্যে ব্যবহৃত হয়েছে। অন্য ইউজারনেম দিন।' });
       return;
     }
 
     const id = `c-${crypto.randomUUID().slice(0, 8)}`;
+    const operatorId = crypto.randomUUID();
     const now = new Date().toISOString();
-    db.prepare(
-      'INSERT INTO counters (id, counter_name, phone, address, logo_url, created_at) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(id, counter_name.trim(), phone.trim(), address.trim(), (logo_url || '').trim(), now);
+
+    db.transaction(() => {
+      db.prepare(
+        'INSERT INTO counters (id, counter_name, phone, address, logo_url, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(id, cleanName, cleanPhone, cleanAddress, (logo_url || '').trim(), now);
+
+      db.prepare(
+        'INSERT INTO profiles (id, email, full_name, phone, password_hash, role, counter_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(
+        operatorId,
+        cleanUsername,
+        `${cleanName} অপারেটর`,
+        cleanPhone,
+        hashPassword(cleanPassword),
+        'counter_admin',
+        id,
+        now
+      );
+    })();
 
     res.status(201).json(db.prepare('SELECT * FROM counters WHERE id = ?').get(id));
   });
@@ -916,7 +1118,10 @@ async function startServer() {
   });
 
   app.delete('/api/admin/counters/:id', requireSuperAdmin, (req, res) => {
-    db.prepare('DELETE FROM counters WHERE id = ?').run(req.params.id);
+    db.transaction(() => {
+      db.prepare("DELETE FROM profiles WHERE counter_id = ? AND role = 'counter_admin'").run(req.params.id);
+      db.prepare('DELETE FROM counters WHERE id = ?').run(req.params.id);
+    })();
     res.json({ success: true });
   });
 
@@ -976,9 +1181,10 @@ async function startServer() {
   app.get('/api/admin/users', requireSuperAdmin, (_req, res) => {
     const users = db
       .prepare(`
-        SELECT p.id, p.email, p.full_name, p.role, p.counter_id, p.created_at, c.counter_name
+        SELECT p.id, p.email, p.full_name, p.phone, p.role, p.counter_id, p.created_at, c.counter_name
         FROM profiles p
         LEFT JOIN counters c ON c.id = p.counter_id
+        WHERE p.role != 'super_admin'
         ORDER BY p.created_at DESC
       `)
       .all();
@@ -986,38 +1192,45 @@ async function startServer() {
   });
 
   app.post('/api/admin/users', requireSuperAdmin, (req, res) => {
-    const { email, full_name, password, role, counter_id } = req.body as {
+    const { email, full_name, phone, password, role, counter_id } = req.body as {
       email?: string;
       full_name?: string;
+      phone?: string;
       password?: string;
       role?: 'user' | 'counter_admin' | 'super_admin';
       counter_id?: string | null;
     };
 
-    if (!email?.trim() || !password || password.length < 6 || !role) {
-      res.status(400).json({ error: 'Email, password (min 6 chars), and role are required' });
+    if (!email?.trim() || !password || password.length < 4 || !role) {
+      res.status(400).json({ error: 'ইউজারনেম, পাসওয়ার্ড (কমপক্ষে ৪ অক্ষর) এবং রোল আবশ্যক' });
+      return;
+    }
+
+    if (role === 'super_admin' || email.trim().toLowerCase() === MASTER_ADMIN_USERNAME.toLowerCase()) {
+      res.status(403).json({ error: 'মাস্টার সুপার অ্যাডমিন অ্যাকাউন্ট নির্ধারিত এবং পরিবর্তনযোগ্য নয়' });
       return;
     }
 
     if (role === 'counter_admin' && !counter_id) {
-      res.status(400).json({ error: 'Counter Operator accounts must be assigned to a counter' });
+      res.status(400).json({ error: 'কাউন্টার অপারেটরের জন্য একটি কাউন্টার নির্বাচন করা আবশ্যক' });
       return;
     }
 
     const existing = db.prepare('SELECT id FROM profiles WHERE LOWER(email) = LOWER(?)').get(email.trim());
     if (existing) {
-      res.status(409).json({ error: 'Email already exists' });
+      res.status(409).json({ error: 'এই ইউজারনেমটি ইতিমধ্যে ব্যবহৃত হয়েছে' });
       return;
     }
 
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     db.prepare(
-      'INSERT INTO profiles (id, email, full_name, password_hash, role, counter_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO profiles (id, email, full_name, phone, password_hash, role, counter_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     ).run(
       id,
-      email.trim().toLowerCase(),
+      email.trim(),
       (full_name || '').trim(),
+      (phone || '').trim(),
       hashPassword(password),
       role,
       role === 'counter_admin' ? counter_id : null,
@@ -1026,7 +1239,7 @@ async function startServer() {
 
     const created = db
       .prepare(`
-        SELECT p.id, p.email, p.full_name, p.role, p.counter_id, p.created_at, c.counter_name
+        SELECT p.id, p.email, p.full_name, p.phone, p.role, p.counter_id, p.created_at, c.counter_name
         FROM profiles p LEFT JOIN counters c ON c.id = p.counter_id WHERE p.id = ?
       `)
       .get(id);
@@ -1034,30 +1247,42 @@ async function startServer() {
   });
 
   app.patch('/api/admin/users/:id', requireSuperAdmin, (req, res) => {
-    const { role, counter_id } = req.body as {
+    const { role, counter_id, password } = req.body as {
       role?: 'user' | 'counter_admin' | 'super_admin';
       counter_id?: string | null;
+      password?: string;
     };
 
-    if (!role || !['user', 'counter_admin', 'super_admin'].includes(role)) {
-      res.status(400).json({ error: 'Invalid role' });
+    if (!role || !['user', 'counter_admin'].includes(role)) {
+      res.status(400).json({ error: 'শুধুমাত্র যাত্রী অথবা কাউন্টার অপারেটর রোল নির্ধারণ করা যাবে' });
       return;
     }
 
     if (role === 'counter_admin' && !counter_id) {
-      res.status(400).json({ error: 'Counter Operator role requires a counter assignment' });
+      res.status(400).json({ error: 'কাউন্টার অপারেটরের জন্য কাউন্টার নির্ধারণ আবশ্যক' });
       return;
     }
 
-    db.prepare('UPDATE profiles SET role = ?, counter_id = ? WHERE id = ?').run(
-      role,
-      role === 'counter_admin' ? counter_id : null,
-      req.params.id
-    );
+    if (password && password.trim().length >= 4) {
+      db.prepare('UPDATE profiles SET role = ?, counter_id = ?, password_hash = ? WHERE id = ? AND role != ?').run(
+        role,
+        role === 'counter_admin' ? counter_id : null,
+        hashPassword(password.trim()),
+        req.params.id,
+        'super_admin'
+      );
+    } else {
+      db.prepare('UPDATE profiles SET role = ?, counter_id = ? WHERE id = ? AND role != ?').run(
+        role,
+        role === 'counter_admin' ? counter_id : null,
+        req.params.id,
+        'super_admin'
+      );
+    }
 
     const updated = db
       .prepare(`
-        SELECT p.id, p.email, p.full_name, p.role, p.counter_id, p.created_at, c.counter_name
+        SELECT p.id, p.email, p.full_name, p.phone, p.role, p.counter_id, p.created_at, c.counter_name
         FROM profiles p LEFT JOIN counters c ON c.id = p.counter_id WHERE p.id = ?
       `)
       .get(req.params.id);
@@ -1067,10 +1292,10 @@ async function startServer() {
 
   app.delete('/api/admin/users/:id', requireSuperAdmin, (req: AuthedRequest, res) => {
     if (req.user!.id === req.params.id) {
-      res.status(400).json({ error: 'You cannot delete your own active Super Admin account' });
+      res.status(400).json({ error: 'মাস্টার সুপার অ্যাডমিন অ্যাকাউন্ট মুছে ফেলা যাবে না' });
       return;
     }
-    db.prepare('DELETE FROM profiles WHERE id = ?').run(req.params.id);
+    db.prepare("DELETE FROM profiles WHERE id = ? AND role != 'super_admin'").run(req.params.id);
     res.json({ success: true });
   });
 

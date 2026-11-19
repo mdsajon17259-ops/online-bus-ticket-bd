@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   Plus,
   Settings,
+  Ticket,
   Trash2,
   Upload,
   Users,
@@ -18,11 +19,13 @@ import {
   deleteAdminUser,
   deleteCounter,
   deleteTrip,
+  fetchAdminBookings,
   fetchAdminOverview,
   fetchAllUsers,
   fetchCounters,
   fetchTrips,
   updateAppSettings,
+  updateBookingStatus,
   updateUserRole,
 } from '../lib/api';
 import {
@@ -33,16 +36,18 @@ import {
 } from '../lib/format';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import { useApp } from '../context/AppContext';
-import type { AdminOverview, Counter, Profile, Trip, UserRole } from '../types';
+import type { AdminOverview, Booking, Counter, Profile, Trip, UserRole } from '../types';
 import { AuthScreen } from './AuthScreen';
+import { StatusBadge } from './StatusBadge';
 
-type AdminSection = 'overview' | 'counters' | 'users' | 'settings';
+type AdminSection = 'overview' | 'bookings' | 'counters' | 'users' | 'settings';
 
 export function SuperAdminPanel() {
   const { user, authLoading, settings, setSettingsDirect, refreshSettings } = useApp();
   const [section, setSection] = useState<AdminSection>('overview');
 
   const [overview, setOverview] = useState<AdminOverview | null>(null);
+  const [allBookings, setAllBookings] = useState<Booking[]>([]);
   const [counters, setCounters] = useState<Counter[]>([]);
   const [trips, setTrips] = useState<Trip[]>([]);
   const [users, setUsers] = useState<Profile[]>([]);
@@ -55,11 +60,13 @@ export function SuperAdminPanel() {
   const [orgLogoUrl, setOrgLogoUrl] = useState(settings.organization_logo_url);
   const [savingSettings, setSavingSettings] = useState(false);
 
-  // New Counter Form
+  // New Counter Form (includes required Counter Operator Username & Password)
   const [cName, setCName] = useState('');
   const [cPhone, setCPhone] = useState('');
   const [cAddress, setCAddress] = useState('');
   const [cLogoUrl, setCLogoUrl] = useState('');
+  const [cUsername, setCUsername] = useState('');
+  const [cPassword, setCPassword] = useState('');
   const [creatingCounter, setCreatingCounter] = useState(false);
 
   // New Trip Form
@@ -72,9 +79,10 @@ export function SuperAdminPanel() {
   const [tSeats, setTSeats] = useState('36');
   const [creatingTrip, setCreatingTrip] = useState(false);
 
-  // New User Form
-  const [uEmail, setUEmail] = useState('');
+  // New User / Counter Operator Form
+  const [uUsername, setUUsername] = useState('');
   const [uName, setUName] = useState('');
+  const [uPhone, setUPhone] = useState('');
   const [uPassword, setUPassword] = useState('');
   const [uRole, setURole] = useState<UserRole>('counter_admin');
   const [uCounterId, setUCounterId] = useState('');
@@ -85,20 +93,22 @@ export function SuperAdminPanel() {
     setOrgLogoUrl(settings.organization_logo_url);
   }, [settings]);
 
-  const isSuperAdmin = user?.role === 'super_admin';
+  const isMasterSuperAdmin = user?.role === 'super_admin' && user?.email === 'Sajonvip';
 
   const loadAdminData = useCallback(async () => {
-    if (!isSuperAdmin) return;
+    if (!isMasterSuperAdmin) return;
     setLoading(true);
     setError('');
     try {
-      const [ov, cList, tList, uList] = await Promise.all([
+      const [ov, bList, cList, tList, uList] = await Promise.all([
         fetchAdminOverview(),
+        fetchAdminBookings(),
         fetchCounters(),
         fetchTrips(),
         fetchAllUsers(),
       ]);
       setOverview(ov);
+      setAllBookings(bList);
       setCounters(cList);
       setTrips(tList);
       setUsers(uList);
@@ -111,7 +121,7 @@ export function SuperAdminPanel() {
     } finally {
       setLoading(false);
     }
-  }, [isSuperAdmin]);
+  }, [isMasterSuperAdmin]);
 
   useEffect(() => {
     loadAdminData();
@@ -179,13 +189,17 @@ export function SuperAdminPanel() {
         phone: cPhone,
         address: cAddress,
         logo_url: cLogoUrl,
+        operator_username: cUsername,
+        operator_password: cPassword,
       });
       setCName('');
       setCPhone('');
       setCAddress('');
       setCLogoUrl('');
+      setCUsername('');
+      setCPassword('');
       await loadAdminData();
-      showNotice('নতুন বাস কাউন্টার যুক্ত করা হয়েছে।');
+      showNotice('নতুন বাস কাউন্টার ও অপারেটর অ্যাকাউন্ট সফলভাবে তৈরি হয়েছে।');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'কাউন্টার তৈরি করা যায়নি');
     } finally {
@@ -224,17 +238,19 @@ export function SuperAdminPanel() {
     setError('');
     try {
       await createAdminUser({
-        email: uEmail,
+        email: uUsername,
         full_name: uName,
+        phone: uPhone,
         password: uPassword,
         role: uRole,
         counter_id: uRole === 'counter_admin' ? uCounterId : null,
       });
-      setUEmail('');
+      setUUsername('');
       setUName('');
+      setUPhone('');
       setUPassword('');
       await loadAdminData();
-      showNotice('নতুন ব্যবহারকারী ও রোল সফলভাবে তৈরি হয়েছে।');
+      showNotice('নতুন কাউন্টার অপারেটর/ব্যবহারকারী অ্যাকাউন্ট তৈরি হয়েছে।');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'ব্যবহারকারী তৈরি করা যায়নি');
     } finally {
@@ -261,21 +277,22 @@ export function SuperAdminPanel() {
     );
   }
 
-  if (!isSuperAdmin) {
+  if (!isMasterSuperAdmin) {
     return (
       <AuthScreen
         requiredRole="super_admin"
         redirectTo="admin"
-        title="সুপার অ্যাডমিন মাস্টার লগইন"
-        subtitle="প্রতিষ্ঠানের ব্র্যান্ডিং, কাউন্টার, রুট, সময়সূচি ও ব্যবহারকারীর অনুমতি পরিচালনা করতে সুপার অ্যাডমিন অ্যাকাউন্ট দিয়ে লগইন করুন।"
+        title="মাস্টার সুপার অ্যাডমিন লগইন"
+        subtitle="প্রতিষ্ঠানের ব্র্যান্ডিং, কাউন্টার, অপারেটর ইউজারনেম/পাসওয়ার্ড এবং সকল ট্রিপ পরিচালনা করতে মাস্টার সুপার অ্যাডমিন অ্যাকাউন্ট দিয়ে লগইন করুন।"
       />
     );
   }
 
   const sidebarItems: Array<{ id: AdminSection; label: string; icon: React.ComponentType<{ className?: string }> }> = [
     { id: 'overview', label: 'সার্বিক বিবরণ', icon: LayoutDashboard },
+    { id: 'bookings', label: 'সকল বুকিং', icon: Ticket },
     { id: 'counters', label: 'কাউন্টার ও ট্রিপ', icon: Bus },
-    { id: 'users', label: 'ব্যবহারকারী ও রোল', icon: Users },
+    { id: 'users', label: 'অপারেটর ও ব্যবহারকারী', icon: Users },
     { id: 'settings', label: 'প্রতিষ্ঠান সেটিংস', icon: Settings },
   ];
 
@@ -288,7 +305,7 @@ export function SuperAdminPanel() {
       </datalist>
 
       <div className="flex flex-col lg:flex-row gap-8 items-start">
-        {/* Sidebar Navigation (240px desktop) */}
+        {/* Sidebar Navigation */}
         <aside className="w-full lg:w-60 shrink-0 bg-white border border-slate-200 rounded-xl p-2 flex lg:flex-col gap-1 overflow-x-auto">
           {sidebarItems.map((item) => {
             const Icon = item.icon;
@@ -381,7 +398,6 @@ export function SuperAdminPanel() {
                 </div>
               </div>
 
-              {/* Per-Counter Breakdown Table */}
               <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
                 <div className="px-5 py-4 border-b border-slate-200">
                   <h2 className="font-display text-base font-bold text-slate-900">
@@ -420,7 +436,95 @@ export function SuperAdminPanel() {
             </div>
           )}
 
-          {/* 2. SETTINGS SECTION (Dynamic Branding) */}
+          {/* 2. ALL BOOKINGS OVERSIGHT */}
+          {section === 'bookings' && (
+            <div className="space-y-6">
+              <div>
+                <h1 className="font-display text-2xl font-bold text-slate-900">
+                  সকল কাউন্টারের বুকিং তালিকা
+                </h1>
+                <p className="text-sm text-slate-600 mt-0.5">
+                  মোট {formatBanglaNumber(allBookings.length)}টি বুকিং অনুরোধ তদারকি ও পরিচালনা করুন।
+                </p>
+              </div>
+
+              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-500">
+                        <th className="py-3 px-4">আইডি</th>
+                        <th className="py-3 px-4">যাত্রী</th>
+                        <th className="py-3 px-4">কাউন্টার ও রুট</th>
+                        <th className="py-3 px-4">আসন</th>
+                        <th className="py-3 px-4 text-right">ভাড়া</th>
+                        <th className="py-3 px-4">অবস্থা</th>
+                        <th className="py-3 px-4 text-right">পদক্ষেপ</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-sm">
+                      {allBookings.map((b) => (
+                        <tr key={b.id} className="hover:bg-slate-50/70">
+                          <td className="py-3 px-4 font-mono text-xs font-semibold text-slate-900 tabular-nums whitespace-nowrap">
+                            {b.id}
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="font-medium text-slate-900">{b.passenger_name}</div>
+                            <div className="text-xs font-mono text-slate-500 tabular-nums">{b.phone}</div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="font-medium text-slate-900">{b.trip?.counter_name}</div>
+                            <div className="text-xs text-slate-500">
+                              {b.trip?.route_from} → {b.trip?.route_to}
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 font-mono text-xs font-semibold tabular-nums">
+                            {b.selected_seats.join(', ')}
+                          </td>
+                          <td className="py-3 px-4 font-mono font-semibold text-right tabular-nums">
+                            {formatBDT(b.total_fare)}
+                          </td>
+                          <td className="py-3 px-4">
+                            <StatusBadge status={b.status} />
+                          </td>
+                          <td className="py-3 px-4 text-right whitespace-nowrap">
+                            <div className="inline-flex items-center gap-2">
+                              {b.status !== 'confirmed' && (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    await updateBookingStatus(b.id, 'confirmed');
+                                    await loadAdminData();
+                                  }}
+                                  className="min-h-[34px] px-2.5 py-1 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-md"
+                                >
+                                  নিশ্চিত
+                                </button>
+                              )}
+                              {b.status !== 'cancelled' && (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    await updateBookingStatus(b.id, 'cancelled');
+                                    await loadAdminData();
+                                  }}
+                                  className="min-h-[34px] px-2.5 py-1 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-md"
+                                >
+                                  বাতিল
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 3. SETTINGS SECTION (Dynamic Branding) */}
           {section === 'settings' && (
             <div className="space-y-6">
               <div>
@@ -436,7 +540,6 @@ export function SuperAdminPanel() {
                 onSubmit={handleSaveSettings}
                 className="bg-white border border-slate-200 rounded-xl p-6 space-y-6 max-w-2xl"
               >
-                {/* Live Preview */}
                 <div className="pb-5 border-b border-slate-200">
                   <p className="text-xs font-medium text-slate-500 mb-2.5">লাইভ হেডার ব্র্যান্ডিং প্রিভিউ</p>
                   <div className="flex items-center gap-3 p-3.5 rounded-lg bg-slate-50 border border-slate-200">
@@ -458,7 +561,6 @@ export function SuperAdminPanel() {
                   </div>
                 </div>
 
-                {/* Organization Name Input */}
                 <div>
                   <label htmlFor="org-name" className="block text-xs font-medium text-slate-700 mb-1.5">
                     প্রতিষ্ঠানের নাম
@@ -469,12 +571,11 @@ export function SuperAdminPanel() {
                     required
                     value={orgName}
                     onChange={(e) => setOrgName(e.target.value)}
-                    placeholder="বেঙ্গল ট্রানজিট নেটওয়ার্ক"
+                    placeholder="দেশ ভ্রমণ / Desh Travels"
                     className="w-full min-h-[44px] px-3.5 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
                   />
                 </div>
 
-                {/* Organization Logo Upload + URL */}
                 <div className="space-y-3">
                   <label htmlFor="org-logo-url" className="block text-xs font-medium text-slate-700">
                     প্রতিষ্ঠানের লোগো
@@ -499,9 +600,6 @@ export function SuperAdminPanel() {
                       />
                     </label>
                   </div>
-                  <p className="text-xs text-slate-500">
-                    PNG, JPG বা SVG লোগো আপলোড করুন অথবা ছবির URL বসান।
-                  </p>
                 </div>
 
                 <div className="pt-2 flex items-center justify-end gap-3">
@@ -515,7 +613,6 @@ export function SuperAdminPanel() {
                 </div>
               </form>
 
-              {/* Database Backend Reference */}
               <div className="bg-white border border-slate-200 rounded-xl p-6 max-w-2xl space-y-2">
                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                   <Database className="w-4 h-4 text-blue-700" aria-hidden="true" />
@@ -535,7 +632,7 @@ export function SuperAdminPanel() {
             </div>
           )}
 
-          {/* 3. COUNTERS & TRIPS MANAGEMENT */}
+          {/* 4. COUNTERS & TRIPS MANAGEMENT */}
           {section === 'counters' && (
             <div className="space-y-8">
               <div>
@@ -548,14 +645,13 @@ export function SuperAdminPanel() {
               </div>
 
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                {/* Add Counter Form */}
                 <form
                   onSubmit={handleCreateCounter}
                   className="bg-white border border-slate-200 rounded-xl p-5 space-y-4"
                 >
                   <h2 className="font-display text-base font-bold text-slate-900 flex items-center gap-2">
                     <Building2 className="w-4 h-4 text-blue-700" aria-hidden="true" />
-                    <span>নতুন বাস কাউন্টার যোগ করুন</span>
+                    <span>নতুন কাউন্টার যোগ করুন</span>
                   </h2>
                   <div className="space-y-3">
                     <input
@@ -589,6 +685,37 @@ export function SuperAdminPanel() {
                       placeholder="লোগো URL (ঐচ্ছিক)"
                       className="w-full min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
                     />
+                    <div className="pt-2 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label htmlFor="c-username" className="block text-[11px] font-medium text-slate-600 mb-1">
+                          কাউন্টার ইউজারনেম *
+                        </label>
+                        <input
+                          id="c-username"
+                          type="text"
+                          required
+                          value={cUsername}
+                          onChange={(e) => setCUsername(e.target.value)}
+                          placeholder="যেমন: ena_counter"
+                          className="w-full min-h-[42px] px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="c-password" className="block text-[11px] font-medium text-slate-600 mb-1">
+                          কাউন্টার পাসওয়ার্ড *
+                        </label>
+                        <input
+                          id="c-password"
+                          type="password"
+                          required
+                          minLength={4}
+                          value={cPassword}
+                          onChange={(e) => setCPassword(e.target.value)}
+                          placeholder="কমপক্ষে ৪ অক্ষর"
+                          className="w-full min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
+                        />
+                      </div>
+                    </div>
                   </div>
                   <button
                     type="submit"
@@ -600,7 +727,6 @@ export function SuperAdminPanel() {
                   </button>
                 </form>
 
-                {/* Add Trip Form */}
                 <form
                   onSubmit={handleCreateTrip}
                   className="bg-white border border-slate-200 rounded-xl p-5 space-y-4"
@@ -699,7 +825,6 @@ export function SuperAdminPanel() {
                 </form>
               </div>
 
-              {/* Registered Counters Table */}
               <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
                 <div className="px-5 py-4 border-b border-slate-200">
                   <h2 className="font-display text-base font-bold text-slate-900">
@@ -711,38 +836,46 @@ export function SuperAdminPanel() {
                     <thead>
                       <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-500">
                         <th className="py-3 px-5">কাউন্টারের নাম</th>
+                        <th className="py-3 px-5">অপারেটর ইউজারনেম</th>
                         <th className="py-3 px-5">মোবাইল</th>
                         <th className="py-3 px-5">ঠিকানা</th>
                         <th className="py-3 px-5 text-right">মুছুন</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-sm">
-                      {counters.map((c) => (
-                        <tr key={c.id} className="hover:bg-slate-50/70">
-                          <td className="py-3 px-5 font-medium text-slate-900">{c.counter_name}</td>
-                          <td className="py-3 px-5 font-mono text-xs text-slate-600 tabular-nums">{c.phone}</td>
-                          <td className="py-3 px-5 text-xs text-slate-600">{c.address}</td>
-                          <td className="py-3 px-5 text-right">
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                await deleteCounter(c.id);
-                                await loadAdminData();
-                              }}
-                              aria-label={`${c.counter_name} মুছুন`}
-                              className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
+                      {counters.map((c) => {
+                        const ops = users.filter(
+                          (u) => u.role === 'counter_admin' && u.counter_id === c.id
+                        );
+                        return (
+                          <tr key={c.id} className="hover:bg-slate-50/70">
+                            <td className="py-3 px-5 font-medium text-slate-900">{c.counter_name}</td>
+                            <td className="py-3 px-5 font-mono text-xs text-blue-700">
+                              {ops.length > 0 ? ops.map((op) => op.email).join(', ') : 'নির্ধারিত নয়'}
+                            </td>
+                            <td className="py-3 px-5 font-mono text-xs text-slate-600 tabular-nums">{c.phone}</td>
+                            <td className="py-3 px-5 text-xs text-slate-600">{c.address}</td>
+                            <td className="py-3 px-5 text-right">
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  await deleteCounter(c.id);
+                                  await loadAdminData();
+                                }}
+                                aria-label={`${c.counter_name} মুছুন`}
+                                className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
               </div>
 
-              {/* Scheduled Trips Table */}
               <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
                 <div className="px-5 py-4 border-b border-slate-200">
                   <h2 className="font-display text-base font-bold text-slate-900">
@@ -805,25 +938,24 @@ export function SuperAdminPanel() {
             </div>
           )}
 
-          {/* 4. USER MANAGEMENT & ROLE ASSIGNMENTS */}
+          {/* 5. OPERATOR & USER MANAGEMENT */}
           {section === 'users' && (
             <div className="space-y-6">
               <div>
                 <h1 className="font-display text-2xl font-bold text-slate-900">
-                  ব্যবহারকারী ও রোল ব্যবস্থাপনা
+                  কাউন্টার অপারেটর ও ব্যবহারকারী ব্যবস্থাপনা
                 </h1>
                 <p className="text-sm text-slate-600 mt-0.5">
-                  নতুন অ্যাকাউন্ট তৈরি করুন এবং সুপার অ্যাডমিন, কাউন্টার অপারেটর অথবা যাত্রী রোল নির্ধারণ করুন।
+                  প্রতিটি বাস কাউন্টারের জন্য আলাদা অপারেটর ইউজারনেম ও পাসওয়ার্ড তৈরি করুন এবং নির্দিষ্ট কাউন্টারে যুক্ত করুন।
                 </p>
               </div>
 
-              {/* Create User Form */}
               <form
                 onSubmit={handleCreateUser}
                 className="bg-white border border-slate-200 rounded-xl p-5 space-y-4"
               >
                 <h2 className="font-display text-base font-bold text-slate-900">
-                  নতুন অপারেটর বা ব্যবহারকারী অ্যাকাউন্ট তৈরি করুন
+                  নতুন কাউন্টার অপারেটর / ব্যবহারকারী তৈরি করুন
                 </h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   <input
@@ -831,24 +963,31 @@ export function SuperAdminPanel() {
                     required
                     value={uName}
                     onChange={(e) => setUName(e.target.value)}
-                    placeholder="পূর্ণ নাম"
+                    placeholder="অপারেটরের পূর্ণ নাম"
                     className="min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
                   />
                   <input
-                    type="email"
+                    type="text"
                     required
-                    value={uEmail}
-                    onChange={(e) => setUEmail(e.target.value)}
-                    placeholder="ইমেইল ঠিকানা"
+                    value={uUsername}
+                    onChange={(e) => setUUsername(e.target.value)}
+                    placeholder="ইউজারনেম (যেমন: ena_dhaka)"
+                    className="min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
+                  />
+                  <input
+                    type="tel"
+                    value={uPhone}
+                    onChange={(e) => setUPhone(e.target.value)}
+                    placeholder="মোবাইল নম্বর (ঐচ্ছিক)"
                     className="min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
                   />
                   <input
                     type="password"
                     required
-                    minLength={6}
+                    minLength={4}
                     value={uPassword}
                     onChange={(e) => setUPassword(e.target.value)}
-                    placeholder="পাসওয়ার্ড (কমপক্ষে ৬ অক্ষর)"
+                    placeholder="পাসওয়ার্ড (কমপক্ষে ৪ অক্ষর)"
                     className="min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
                   />
                   <select
@@ -858,7 +997,6 @@ export function SuperAdminPanel() {
                     className="min-h-[42px] px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
                   >
                     <option value="counter_admin">কাউন্টার অপারেটর</option>
-                    <option value="super_admin">সুপার অ্যাডমিন</option>
                     <option value="user">সাধারণ যাত্রী</option>
                   </select>
 
@@ -888,13 +1026,12 @@ export function SuperAdminPanel() {
                 </div>
               </form>
 
-              {/* Users List */}
               <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-500">
-                        <th className="py-3 px-5">অ্যাকাউন্ট</th>
+                        <th className="py-3 px-5">অ্যাকাউন্ট / ইউজারনেম</th>
                         <th className="py-3 px-5">রোল</th>
                         <th className="py-3 px-5">নির্ধারিত কাউন্টার</th>
                         <th className="py-3 px-5 text-right">মুছুন</th>
@@ -905,13 +1042,15 @@ export function SuperAdminPanel() {
                         <tr key={u.id} className="hover:bg-slate-50/70">
                           <td className="py-3 px-5">
                             <div className="font-medium text-slate-900">{u.full_name || u.email}</div>
-                            <div className="text-xs text-slate-500">{u.email}</div>
+                            <div className="text-xs font-mono text-slate-500">
+                              ইউজারনেম: {u.email}
+                              {u.phone ? ` · ${u.phone}` : ''}
+                            </div>
                           </td>
                           <td className="py-3 px-5">
                             <select
                               aria-label={`${u.email} এর রোল`}
                               value={u.role}
-                              disabled={u.id === user.id}
                               onChange={(e) => {
                                 const nextRole = e.target.value as UserRole;
                                 const nextCounter =
@@ -920,11 +1059,10 @@ export function SuperAdminPanel() {
                                     : null;
                                 handleRoleUpdate(u.id, nextRole, nextCounter);
                               }}
-                              className="min-h-[36px] px-2.5 py-1 text-xs font-medium bg-white border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-700 disabled:bg-slate-100"
+                              className="min-h-[36px] px-2.5 py-1 text-xs font-medium bg-white border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-700"
                             >
                               <option value="user">যাত্রী (user)</option>
                               <option value="counter_admin">কাউন্টার অপারেটর (counter_admin)</option>
-                              <option value="super_admin">সুপার অ্যাডমিন (super_admin)</option>
                             </select>
                           </td>
                           <td className="py-3 px-5">
@@ -946,19 +1084,17 @@ export function SuperAdminPanel() {
                             )}
                           </td>
                           <td className="py-3 px-5 text-right">
-                            {u.id !== user.id && (
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  await deleteAdminUser(u.id);
-                                  await loadAdminData();
-                                }}
-                                aria-label={`${u.email} মুছুন`}
-                                className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await deleteAdminUser(u.id);
+                                await loadAdminData();
+                              }}
+                              aria-label={`${u.email} মুছুন`}
+                              className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
                           </td>
                         </tr>
                       ))}

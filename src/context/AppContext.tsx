@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import {
   fetchAppSettings,
   fetchCurrentUser,
-  loginWithEmail,
+  loginWithIdentifier,
   registerPassenger,
   signOutUser,
 } from '../lib/api';
@@ -19,14 +19,19 @@ interface AppContextValue {
   authLoading: boolean;
   activePanel: ActivePanel;
   setActivePanel: (panel: ActivePanel) => void;
-  login: (email: string, password: string) => Promise<Profile>;
-  register: (email: string, password: string, fullName: string) => Promise<Profile>;
+  login: (identifier: string, password: string) => Promise<Profile>;
+  register: (payload: {
+    full_name: string;
+    phone: string;
+    password: string;
+    email?: string;
+  }) => Promise<Profile>;
   logout: () => Promise<void>;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
   id: 1,
-  organization_name: 'বেঙ্গল ট্রানজিট নেটওয়ার্ক',
+  organization_name: 'দেশ ভ্রমণ / Desh Travels',
   organization_logo_url: '/src/assets/images/default_org_logo_1794840144839.jpg',
   updated_at: new Date().toISOString(),
 };
@@ -45,7 +50,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const data = await fetchAppSettings();
       if (data) {
         setSettings(data);
-        document.title = `${data.organization_name} — বাস টিকেট বুকিং`;
+        document.title = `${data.organization_name} — অনলাইন বাস টিকেট বুকিং`;
       }
     } catch (err) {
       console.error('Failed to load dynamic branding settings:', err);
@@ -57,22 +62,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     refreshSettings();
     fetchCurrentUser()
-      .then((profile) => setUser(profile))
+      .then((profile) => {
+        setUser(profile);
+        if (profile?.role === 'super_admin' && profile.email === 'Sajonvip') {
+          setActivePanel('admin');
+        } else if (profile?.role === 'counter_admin') {
+          setActivePanel('operator');
+        }
+      })
       .catch(() => setUser(null))
       .finally(() => setAuthLoading(false));
   }, [refreshSettings]);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const res = await loginWithEmail(email, password);
+  const login = useCallback(async (identifier: string, password: string) => {
+    const res = await loginWithIdentifier(identifier, password);
     setUser(res.user);
     return res.user;
   }, []);
 
-  const register = useCallback(async (email: string, password: string, fullName: string) => {
-    const res = await registerPassenger(email, password, fullName);
-    setUser(res.user);
-    return res.user;
-  }, []);
+  const register = useCallback(
+    async (payload: { full_name: string; phone: string; password: string; email?: string }) => {
+      const res = await registerPassenger(payload);
+      setUser(res.user);
+      return res.user;
+    },
+    []
+  );
 
   const logout = useCallback(async () => {
     await signOutUser();

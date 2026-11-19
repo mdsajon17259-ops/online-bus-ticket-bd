@@ -8,7 +8,7 @@ import { AuthScreen } from './components/AuthScreen';
 import { formatBanglaNumber } from './lib/format';
 
 function AppShell() {
-  const { activePanel, setActivePanel, settings } = useApp();
+  const { activePanel, setActivePanel, settings, user } = useApp();
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
@@ -42,20 +42,15 @@ function AppShell() {
             >
               টিকেট যাচাই
             </button>
-            <button
-              type="button"
-              onClick={() => setActivePanel('operator')}
-              className="hover:text-slate-900 transition-colors"
-            >
-              কাউন্টার প্যানেল
-            </button>
-            <button
-              type="button"
-              onClick={() => setActivePanel('admin')}
-              className="hover:text-slate-900 transition-colors"
-            >
-              অ্যাডমিন প্যানেল
-            </button>
+            {!user && (
+              <button
+                type="button"
+                onClick={() => setActivePanel('auth')}
+                className="hover:text-slate-900 transition-colors"
+              >
+                লগইন করুন
+              </button>
+            )}
           </div>
         </div>
       </footer>
