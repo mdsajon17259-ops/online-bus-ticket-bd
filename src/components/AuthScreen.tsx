@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Bus, KeyRound, Lock, Phone, ShieldCheck, Ticket, User } from 'lucide-react';
 import { useApp, type ActivePanel } from '../context/AppContext';
+import { isMasterSuperAdminProfile } from '../lib/api';
 
 interface AuthScreenProps {
   requiredRole?: 'counter_admin' | 'super_admin';
@@ -40,7 +41,7 @@ export function AuthScreen({
           ? await login(identifier, password)
           : await register({ full_name: fullName, phone, password });
 
-      if (profile.role === 'super_admin' && profile.email === 'Sajonvip') {
+      if (isMasterSuperAdminProfile(profile)) {
         setActivePanel('admin');
       } else if (profile.role === 'counter_admin') {
         setActivePanel('operator');
@@ -59,10 +60,10 @@ export function AuthScreen({
   if (
     user &&
     requiredRole &&
-    ((requiredRole === 'super_admin' && !(user.role === 'super_admin' && user.email === 'Sajonvip')) ||
+    ((requiredRole === 'super_admin' && !isMasterSuperAdminProfile(user)) ||
       (requiredRole === 'counter_admin' &&
         user.role !== 'counter_admin' &&
-        !(user.role === 'super_admin' && user.email === 'Sajonvip')))
+        !isMasterSuperAdminProfile(user)))
   ) {
     return (
       <main className="max-w-lg mx-auto px-4 py-14">

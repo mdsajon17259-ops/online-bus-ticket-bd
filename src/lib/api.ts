@@ -1,4 +1,4 @@
-import { isSupabaseConfigured, supabase } from './supabase';
+import { createEphemeralSupabaseClient, isSupabaseConfigured, supabase } from './supabase';
 import type {
   AdminOverview,
   AppSettings,
@@ -12,6 +12,53 @@ import type {
 } from '../types';
 
 const TOKEN_KEY = 'transit_auth_token';
+
+export const MASTER_ADMIN_USERNAME = 'Sajonvip';
+const MASTER_ADMIN_PASSWORD = 'Sajon2001M';
+const MASTER_ADMIN_SUPABASE_EMAIL = 'sajonvip@deshtravels.bd';
+
+export function isMasterSuperAdminProfile(profile: Profile | null | undefined): boolean {
+  if (!profile || profile.role !== 'super_admin') return false;
+  const idLower = (profile.email || '').trim().toLowerCase();
+  return idLower === MASTER_ADMIN_USERNAME.toLowerCase() || idLower === MASTER_ADMIN_SUPABASE_EMAIL;
+}
+
+function toOperatorAuthEmail(usernameOrEmail: string): string {
+  const clean = usernameOrEmail.trim();
+  if (clean.includes('@')) return clean.toLowerCase();
+  return `${clean.toLowerCase()}@operator.deshtravels.bd`;
+}
+
+function toPassengerAuthEmail(phoneOrEmail: string): string {
+  const clean = phoneOrEmail.trim();
+  if (clean.includes('@')) return clean.toLowerCase();
+  const digits = clean.replace(/[\s-]/g, '');
+  return `${digits}@passenger.deshtravels.bd`;
+}
+
+function mapSupabaseProfile(row: Record<string, unknown>): Profile {
+  const rawEmail = String(row.email || '');
+  const role = row.role as UserRole;
+  const isMaster =
+    role === 'super_admin' ||
+    rawEmail.toLowerCase() === MASTER_ADMIN_SUPABASE_EMAIL ||
+    rawEmail === MASTER_ADMIN_USERNAME;
+
+  return {
+    id: String(row.id),
+    email: isMaster ? MASTER_ADMIN_USERNAME : rawEmail,
+    full_name: row.full_name
+      ? String(row.full_name)
+      : isMaster
+        ? 'মাস্টার সুপার অ্যাডমিন'
+        : undefined,
+    phone: row.phone ? String(row.phone) : undefined,
+    role,
+    counter_id: row.counter_id ? String(row.counter_id) : null,
+    counter_name: (row.counters as { counter_name?: string } | null)?.counter_name || null,
+    created_at: row.created_at ? String(row.created_at) : undefined,
+  };
+}
 
 export function getAuthToken(): string | null {
   try {
@@ -184,10 +231,25 @@ export async function fetchMyBookings(): Promise<Booking[]> {
   if (isSupabaseConfigured && supabase) {
     const { data: userData } = await supabase.auth.getUser();
     if (!userData.user) return [];
-    const { data, error } = await supabase
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('phone')
+      .eq('id', userData.user.id)
+      .maybeSingle();
+
+    let query = supabase
       .from('bookings')
       .select('*, trips(route_from, route_to, departure_time, bus_type, price, counter_id, counters(counter_name))')
       .order('created_at', { ascending: false });
+
+    const phone = (profile?.phone as string | undefined)?.trim();
+    if (phone) {
+      query = query.or(`user_id.eq.${userData.user.id},phone.eq.${phone}`);
+    } else {
+      query = query.eq('user_id', userData.user.id);
+    }
+
+    const { data, error } = await query;
     if (error) throw new Error(error.message);
     return (data || []).map(mapSupabaseBooking);
   }
@@ -217,30 +279,125 @@ export async function loginWithIdentifier(
   password: string
 ): Promise<{ user: Profile }> {
   if (isSupabaseConfigured && supabase) {
-    const { data: authData, error } = await supabase.auth.signInWithPassword({
-      email: identifier,
-      password,
-    });
-    if (error || !authData.user) {
-      throw new Error(error?.message || 'লগইন সম্পন্ন হয়নি');
+    const cleanId = identifier.trim();
+
+    // 1. Master Super Admin Authentication (Username: Sajonvip / Password: Sajon2001M)
+    if (
+      cleanId === MASTER_ADMIN_USERNAME ||
+      cleanId.toLowerCase() === MASTER_ADMIN_SUPABASE_EMAIL
+    ) {
+      if (cleanId !== MASTER_ADMIN_USERNAME || password !== MASTER_ADMIN_PASSWORD) {
+        throw new Error('ভুল ইউজারনেম বা পাসওয়ার্ড');
+      }
+
+      let authUserId: string | null = null;
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+        email: MASTER_ADMIN_SUPABASE_EMAIL,
+        password,
+      });
+
+      if (!signInError && signInData.user) {
+        authUserId = signInData.user.id;
+      } else {
+        // Fallback bootstrap if auth.users row was not yet seeded directly in SQL Editor
+        const { data: signUpData } = await supabase.auth.signUp({
+          email: MASTER_ADMIN_SUPABASE_EMAIL,
+          password,
+          options: {
+            data: {
+              username: MASTER_ADMIN_USERNAME,
+              full_name: 'মাস্টার সুপার অ্যাডমিন',
+            },
+          },
+        });
+        if (signUpData.session && signUpData.user) {
+          authUserId = signUpData.user.id;
+        } else {
+          throw new Error(
+            'Supabase-এ মাস্টার অ্যাডমিন সক্রিয় করতে আপনার Supabase SQL Editor-এ supabase/schema.sql স্ক্রিপ্টটি রান করুন।'
+          );
+        }
+      }
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*, counters(counter_name)')
+        .eq('id', authUserId)
+        .maybeSingle();
+
+      if (profile) {
+        if (profile.role !== 'super_admin') {
+          await supabase.auth.signOut();
+          throw new Error('মাস্টার সুপার অ্যাডমিন রোল নিশ্চিত করা যায়নি');
+        }
+        return { user: mapSupabaseProfile(profile as Record<string, unknown>) };
+      }
+
+      return {
+        user: {
+          id: authUserId,
+          email: MASTER_ADMIN_USERNAME,
+          full_name: 'মাস্টার সুপার অ্যাডমিন',
+          role: 'super_admin',
+          counter_id: null,
+          counter_name: null,
+        },
+      };
     }
+
+    // 2. Counter Operator / Registered Passenger Authentication
+    let authUser = null as { id: string } | null;
+
+    if (cleanId.includes('@')) {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: cleanId,
+        password,
+      });
+      if (error || !data.user) {
+        throw new Error('ভুল ইউজারনেম বা পাসওয়ার্ড');
+      }
+      authUser = data.user;
+    } else {
+      // First try operator email convention, then passenger phone email convention
+      const opAttempt = await supabase.auth.signInWithPassword({
+        email: toOperatorAuthEmail(cleanId),
+        password,
+      });
+      if (!opAttempt.error && opAttempt.data.user) {
+        authUser = opAttempt.data.user;
+      } else {
+        const paxAttempt = await supabase.auth.signInWithPassword({
+          email: toPassengerAuthEmail(cleanId),
+          password,
+        });
+        if (!paxAttempt.error && paxAttempt.data.user) {
+          authUser = paxAttempt.data.user;
+        }
+      }
+    }
+
+    if (!authUser) {
+      throw new Error('ভুল ইউজারনেম বা পাসওয়ার্ড');
+    }
+
     const { data: profile, error: profErr } = await supabase
       .from('profiles')
       .select('*, counters(counter_name)')
-      .eq('id', authData.user.id)
+      .eq('id', authUser.id)
       .single();
+
     if (profErr || !profile) {
+      await supabase.auth.signOut();
       throw new Error('ব্যবহারকারীর প্রোফাইল পাওয়া যায়নি');
     }
-    return {
-      user: {
-        id: profile.id,
-        email: profile.email,
-        role: profile.role,
-        counter_id: profile.counter_id,
-        counter_name: (profile.counters as { counter_name?: string } | null)?.counter_name || null,
-      },
-    };
+
+    // Block any non-Sajonvip credential from entering super_admin
+    if (profile.role === 'super_admin') {
+      await supabase.auth.signOut();
+      throw new Error('ভুল ইউজারনেম বা পাসওয়ার্ড');
+    }
+
+    return { user: mapSupabaseProfile(profile as Record<string, unknown>) };
   }
 
   const res = await apiFetch<{ token: string; user: Profile }>('/api/auth/login', {
@@ -258,26 +415,39 @@ export async function registerPassenger(payload: {
   email?: string;
 }): Promise<{ user: Profile }> {
   if (isSupabaseConfigured && supabase) {
-    const emailToUse = payload.email?.trim() || `${payload.phone.replace(/\D/g, '')}@passenger.deshtravels.bd`;
+    const cleanPhone = payload.phone.trim();
+    const digits = cleanPhone.replace(/[\s-]/g, '');
+    const emailToUse = payload.email?.trim() || toPassengerAuthEmail(cleanPhone);
+
     const { data, error } = await supabase.auth.signUp({
       email: emailToUse,
       password: payload.password,
-      options: { data: { full_name: payload.full_name, phone: payload.phone } },
+      options: {
+        data: {
+          username: digits,
+          full_name: payload.full_name.trim(),
+          phone: cleanPhone,
+          role: 'user',
+        },
+      },
     });
     if (error || !data.user) throw new Error(error?.message || 'নিবন্ধন সম্পন্ন হয়নি');
-    const { error: profErr } = await supabase.from('profiles').insert({
+
+    await supabase.from('profiles').upsert({
       id: data.user.id,
-      email: emailToUse,
+      email: digits,
+      full_name: payload.full_name.trim(),
+      phone: cleanPhone,
       role: 'user',
       counter_id: null,
     });
-    if (profErr) throw new Error(profErr.message);
+
     return {
       user: {
         id: data.user.id,
-        email: emailToUse,
-        full_name: payload.full_name,
-        phone: payload.phone,
+        email: digits,
+        full_name: payload.full_name.trim(),
+        phone: cleanPhone,
         role: 'user',
         counter_id: null,
       },
@@ -300,15 +470,23 @@ export async function fetchCurrentUser(): Promise<Profile | null> {
       .from('profiles')
       .select('*, counters(counter_name)')
       .eq('id', data.user.id)
-      .single();
-    if (!profile) return null;
-    return {
-      id: profile.id,
-      email: profile.email,
-      role: profile.role,
-      counter_id: profile.counter_id,
-      counter_name: (profile.counters as { counter_name?: string } | null)?.counter_name || null,
-    };
+      .maybeSingle();
+
+    if (!profile) {
+      if (data.user.email?.toLowerCase() === MASTER_ADMIN_SUPABASE_EMAIL) {
+        return {
+          id: data.user.id,
+          email: MASTER_ADMIN_USERNAME,
+          full_name: 'মাস্টার সুপার অ্যাডমিন',
+          role: 'super_admin',
+          counter_id: null,
+          counter_name: null,
+        };
+      }
+      return null;
+    }
+
+    return mapSupabaseProfile(profile as Record<string, unknown>);
   }
 
   if (!getAuthToken()) return null;
@@ -499,33 +677,64 @@ export async function createCounter(payload: {
   operator_password: string;
 }): Promise<Counter> {
   if (isSupabaseConfigured && supabase) {
+    const cleanUsername = payload.operator_username.trim();
+    if (!cleanUsername || payload.operator_password.length < 4) {
+      throw new Error('কাউন্টারের জন্য ইউজারনেম এবং কমপক্ষে ৪ অক্ষরের পাসওয়ার্ড নির্ধারণ করুন');
+    }
+    if (cleanUsername.toLowerCase() === MASTER_ADMIN_USERNAME.toLowerCase()) {
+      throw new Error('এই ইউজারনেমটি মাস্টার সুপার অ্যাডমিনের জন্য সংরক্ষিত');
+    }
+
     const { data, error } = await supabase
       .from('counters')
       .insert({
-        counter_name: payload.counter_name,
-        phone: payload.phone,
-        address: payload.address,
-        logo_url: payload.logo_url,
+        counter_name: payload.counter_name.trim(),
+        phone: payload.phone.trim(),
+        address: payload.address.trim(),
+        logo_url: payload.logo_url.trim(),
       })
       .select()
       .single();
     if (error) throw new Error(error.message);
     const createdCounter = data as Counter;
 
-    const { data: opAuth, error: opAuthErr } = await supabase.auth.signUp({
-      email: payload.operator_username,
+    const ephemeral = createEphemeralSupabaseClient();
+    if (!ephemeral) throw new Error('Supabase Auth ক্লায়েন্ট প্রস্তুত নয়');
+
+    const { data: opAuth, error: opAuthErr } = await ephemeral.auth.signUp({
+      email: toOperatorAuthEmail(cleanUsername),
       password: payload.operator_password,
+      options: {
+        data: {
+          username: cleanUsername,
+          full_name: `${payload.counter_name.trim()} অপারেটর`,
+          phone: payload.phone.trim(),
+          role: 'counter_admin',
+        },
+      },
     });
-    if (!opAuthErr && opAuth.user) {
-      await supabase.from('profiles').insert({
-        id: opAuth.user.id,
-        email: payload.operator_username,
-        role: 'counter_admin',
-        counter_id: createdCounter.id,
-      });
+
+    if (opAuthErr || !opAuth.user) {
+      await supabase.from('counters').delete().eq('id', createdCounter.id);
+      throw new Error(opAuthErr?.message || 'অপারেটর অ্যাকাউন্ট তৈরি করা যায়নি');
     }
+
+    const { error: profErr } = await supabase.from('profiles').insert({
+      id: opAuth.user.id,
+      email: cleanUsername,
+      full_name: `${payload.counter_name.trim()} অপারেটর`,
+      phone: payload.phone.trim(),
+      role: 'counter_admin',
+      counter_id: createdCounter.id,
+    });
+    if (profErr) {
+      await supabase.from('counters').delete().eq('id', createdCounter.id);
+      throw new Error(profErr.message);
+    }
+
     return createdCounter;
   }
+
   return apiFetch<Counter>('/api/admin/counters', {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -534,6 +743,7 @@ export async function createCounter(payload: {
 
 export async function deleteCounter(id: string): Promise<void> {
   if (isSupabaseConfigured && supabase) {
+    await supabase.from('profiles').delete().eq('counter_id', id).eq('role', 'counter_admin');
     const { error } = await supabase.from('counters').delete().eq('id', id);
     if (error) throw new Error(error.message);
     return;
@@ -575,16 +785,10 @@ export async function fetchAllUsers(): Promise<Profile[]> {
     const { data, error } = await supabase
       .from('profiles')
       .select('*, counters(counter_name)')
+      .neq('role', 'super_admin')
       .order('created_at', { ascending: false });
     if (error) throw new Error(error.message);
-    return (data || []).map((p: Record<string, unknown>) => ({
-      id: String(p.id),
-      email: String(p.email),
-      role: p.role as UserRole,
-      counter_id: p.counter_id ? String(p.counter_id) : null,
-      counter_name: (p.counters as { counter_name?: string } | null)?.counter_name || null,
-      created_at: String(p.created_at || ''),
-    }));
+    return (data || []).map((p) => mapSupabaseProfile(p as Record<string, unknown>));
   }
   return apiFetch<Profile[]>('/api/admin/users');
 }
@@ -598,23 +802,50 @@ export async function createAdminUser(payload: {
   counter_id: string | null;
 }): Promise<Profile> {
   if (isSupabaseConfigured && supabase) {
-    const { data, error } = await supabase.auth.signUp({
-      email: payload.email,
+    const cleanUsername = payload.email.trim();
+    if (
+      payload.role === 'super_admin' ||
+      cleanUsername.toLowerCase() === MASTER_ADMIN_USERNAME.toLowerCase()
+    ) {
+      throw new Error('মাস্টার সুপার অ্যাডমিন অ্যাকাউন্ট নির্ধারিত এবং পরিবর্তনযোগ্য নয়');
+    }
+
+    const ephemeral = createEphemeralSupabaseClient();
+    if (!ephemeral) throw new Error('Supabase Auth ক্লায়েন্ট প্রস্তুত নয়');
+
+    const authEmail =
+      payload.role === 'counter_admin'
+        ? toOperatorAuthEmail(cleanUsername)
+        : toPassengerAuthEmail(cleanUsername);
+
+    const { data, error } = await ephemeral.auth.signUp({
+      email: authEmail,
       password: payload.password,
+      options: {
+        data: {
+          username: cleanUsername,
+          full_name: payload.full_name.trim(),
+          phone: (payload.phone || '').trim(),
+          role: payload.role,
+        },
+      },
     });
     if (error || !data.user) throw new Error(error?.message || 'ব্যবহারকারী তৈরি করা যায়নি');
+
     const { data: profile, error: profErr } = await supabase
       .from('profiles')
-      .insert({
+      .upsert({
         id: data.user.id,
-        email: payload.email,
+        email: cleanUsername,
+        full_name: payload.full_name.trim(),
+        phone: (payload.phone || '').trim(),
         role: payload.role,
         counter_id: payload.role === 'counter_admin' ? payload.counter_id : null,
       })
-      .select()
+      .select('*, counters(counter_name)')
       .single();
     if (profErr) throw new Error(profErr.message);
-    return profile as Profile;
+    return mapSupabaseProfile(profile as Record<string, unknown>);
   }
   return apiFetch<Profile>('/api/admin/users', {
     method: 'POST',
@@ -629,6 +860,9 @@ export async function updateUserRole(
   new_password?: string
 ): Promise<Profile> {
   if (isSupabaseConfigured && supabase) {
+    if (role === 'super_admin') {
+      throw new Error('শুধুমাত্র যাত্রী অথবা কাউন্টার অপারেটর রোল নির্ধারণ করা যাবে');
+    }
     const { data, error } = await supabase
       .from('profiles')
       .update({
@@ -636,10 +870,11 @@ export async function updateUserRole(
         counter_id: role === 'counter_admin' ? counter_id : null,
       })
       .eq('id', id)
-      .select()
+      .neq('role', 'super_admin')
+      .select('*, counters(counter_name)')
       .single();
     if (error) throw new Error(error.message);
-    return data as Profile;
+    return mapSupabaseProfile(data as Record<string, unknown>);
   }
   return apiFetch<Profile>(`/api/admin/users/${encodeURIComponent(id)}`, {
     method: 'PATCH',
@@ -649,7 +884,11 @@ export async function updateUserRole(
 
 export async function deleteAdminUser(id: string): Promise<void> {
   if (isSupabaseConfigured && supabase) {
-    const { error } = await supabase.from('profiles').delete().eq('id', id);
+    const { error } = await supabase
+      .from('profiles')
+      .delete()
+      .eq('id', id)
+      .neq('role', 'super_admin');
     if (error) throw new Error(error.message);
     return;
   }
@@ -670,6 +909,7 @@ function mapSupabaseBooking(row: Record<string, unknown>): Booking {
   return {
     id: String(row.id),
     trip_id: String(row.trip_id),
+    user_id: row.user_id ? String(row.user_id) : null,
     passenger_name: String(row.passenger_name),
     phone: String(row.phone),
     boarding_point: String(row.boarding_point || ''),

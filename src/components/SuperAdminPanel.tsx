@@ -24,6 +24,7 @@ import {
   fetchAllUsers,
   fetchCounters,
   fetchTrips,
+  isMasterSuperAdminProfile,
   updateAppSettings,
   updateBookingStatus,
   updateUserRole,
@@ -93,7 +94,7 @@ export function SuperAdminPanel() {
     setOrgLogoUrl(settings.organization_logo_url);
   }, [settings]);
 
-  const isMasterSuperAdmin = user?.role === 'super_admin' && user?.email === 'Sajonvip';
+  const isMasterSuperAdmin = isMasterSuperAdminProfile(user);
 
   const loadAdminData = useCallback(async () => {
     if (!isMasterSuperAdmin) return;
@@ -625,8 +626,8 @@ export function SuperAdminPanel() {
                 </div>
                 <p className="text-xs text-slate-600 leading-relaxed">
                   {isSupabaseConfigured
-                    ? 'আপনার Supabase প্রজেক্টের সাথে সরাসরি সংযুক্ত রয়েছে।'
-                    : 'বর্তমানে স্থানীয় SQLite ডাটাবেস ব্যবহৃত হচ্ছে। ক্লাউড Supabase ব্যবহার করতে চাইলে supabase/schema.sql আপনার Supabase SQL Editor-এ রান করে VITE_SUPABASE_URL ও VITE_SUPABASE_ANON_KEY সেট করুন।'}
+                    ? 'আপনার Supabase প্রজেক্টের সাথে সরাসরি সংযুক্ত রয়েছে (মাস্টার অ্যাডমিন: Sajonvip)।'
+                    : 'বর্তমানে স্থানীয় SQLite ডাটাবেস ব্যবহৃত হচ্ছে। ক্লাউড Supabase ব্যবহার করতে চাইলে supabase/schema.sql আপনার Supabase SQL Editor-এ রান করে VITE_SUPABASE_URL ও VITE_SUPABASE_ANON_KEY সেট করুন — সাথে সাথে Sajonvip মাস্টার অ্যাডমিন অ্যাকাউন্টও সক্রিয় হয়ে যাবে।'}
                 </p>
               </div>
             </div>

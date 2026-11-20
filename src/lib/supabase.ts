@@ -17,3 +17,18 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
       },
     })
   : null;
+
+/**
+ * Non-persistent client used when the Super Admin creates counter operator or
+ * user accounts via Supabase Auth signUp so the active Super Admin session is preserved.
+ */
+export function createEphemeralSupabaseClient(): SupabaseClient | null {
+  if (!isSupabaseConfigured || !supabaseUrl || !supabaseAnonKey) return null;
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+}

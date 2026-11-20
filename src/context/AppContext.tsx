@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import {
   fetchAppSettings,
   fetchCurrentUser,
+  isMasterSuperAdminProfile,
   loginWithIdentifier,
   registerPassenger,
   signOutUser,
@@ -64,7 +65,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     fetchCurrentUser()
       .then((profile) => {
         setUser(profile);
-        if (profile?.role === 'super_admin' && profile.email === 'Sajonvip') {
+        if (isMasterSuperAdminProfile(profile)) {
           setActivePanel('admin');
         } else if (profile?.role === 'counter_admin') {
           setActivePanel('operator');

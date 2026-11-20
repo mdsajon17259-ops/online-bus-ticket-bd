@@ -3,7 +3,7 @@
 -- Run this script in your Supabase Project -> SQL Editor
 -- =============================================================================
 
--- Enable UUID extension
+-- Enable pgcrypto for UUID generation and password hashing
 create extension if not exists "pgcrypto";
 
 -- 1. APP SETTINGS TABLE (Dynamic Branding)
@@ -29,10 +29,15 @@ create table if not exists public.counters (
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   email text not null unique,
+  full_name text not null default '',
+  phone text not null default '',
   role text not null default 'user' check (role in ('user', 'counter_admin', 'super_admin')),
   counter_id uuid references public.counters(id) on delete set null,
   created_at timestamptz not null default now()
 );
+
+alter table public.profiles add column if not exists full_name text not null default '';
+alter table public.profiles add column if not exists phone text not null default '';
 
 -- 4. TRIPS TABLE (Schedules & Routes per Counter)
 create table if not exists public.trips (
@@ -41,7 +46,7 @@ create table if not exists public.trips (
   route_from text not null,
   route_to text not null,
   departure_time timestamptz not null,
-  bus_type text not null default 'AC Express Coach',
+  bus_type text not null default 'এসি এক্সপ্রেস কোচ',
   price numeric(10, 2) not null check (price >= 0),
   total_seats integer not null default 36 check (total_seats > 0 and total_seats <= 60),
   created_at timestamptz not null default now()
@@ -60,6 +65,7 @@ create table if not exists public.seats (
 create table if not exists public.bookings (
   id uuid primary key default gen_random_uuid(),
   trip_id uuid not null references public.trips(id) on delete cascade,
+  user_id uuid references auth.users(id) on delete set null,
   passenger_name text not null,
   phone text not null,
   boarding_point text not null default '',
@@ -68,6 +74,8 @@ create table if not exists public.bookings (
   status text not null default 'pending' check (status in ('pending', 'confirmed', 'cancelled')),
   created_at timestamptz not null default now()
 );
+
+alter table public.bookings add column if not exists user_id uuid references auth.users(id) on delete set null;
 
 -- =============================================================================
 -- HELPER FUNCTIONS & TRIGGERS
@@ -105,6 +113,51 @@ create trigger trg_generate_seats
 after insert on public.trips
 for each row
 execute function public.generate_seats_for_trip();
+
+-- Automatically sync profiles row when auth.users is created (supports Master Super Admin & Passenger signup)
+create or replace function public.handle_new_auth_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_username text;
+  v_full_name text;
+  v_phone text;
+begin
+  if lower(new.email) = 'sajonvip@deshtravels.bd' then
+    insert into public.profiles (id, email, full_name, phone, role, counter_id)
+    values (new.id, 'Sajonvip', 'মাস্টার সুপার অ্যাডমিন', '', 'super_admin', null)
+    on conflict (id) do update
+      set email = 'Sajonvip',
+          full_name = 'মাস্টার সুপার অ্যাডমিন',
+          role = 'super_admin',
+          counter_id = null;
+    return new;
+  end if;
+
+  v_username := coalesce(nullif(new.raw_user_meta_data->>'username', ''), new.email);
+  v_full_name := coalesce(new.raw_user_meta_data->>'full_name', '');
+  v_phone := coalesce(new.raw_user_meta_data->>'phone', '');
+
+  -- Only auto-create standard 'user' profiles from public signup metadata;
+  -- counter_admin profiles are explicitly created/assigned by Master Super Admin.
+  if coalesce(new.raw_user_meta_data->>'role', 'user') = 'user' then
+    insert into public.profiles (id, email, full_name, phone, role, counter_id)
+    values (new.id, v_username, v_full_name, v_phone, 'user', null)
+    on conflict (id) do nothing;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+after insert on auth.users
+for each row
+execute function public.handle_new_auth_user();
 
 -- Atomic passenger booking submission (marks seats booked + creates pending booking)
 create or replace function public.submit_booking(
@@ -147,9 +200,9 @@ begin
     and seat_number = any(p_selected_seats);
 
   insert into public.bookings (
-    trip_id, passenger_name, phone, boarding_point, selected_seats, total_fare, status
+    trip_id, user_id, passenger_name, phone, boarding_point, selected_seats, total_fare, status
   ) values (
-    p_trip_id, p_passenger_name, p_phone, p_boarding_point, p_selected_seats,
+    p_trip_id, auth.uid(), p_passenger_name, p_phone, p_boarding_point, p_selected_seats,
     v_price * array_length(p_selected_seats, 1), 'pending'
   )
   returning * into v_booking;
@@ -189,19 +242,25 @@ as $$
 $$;
 
 -- app_settings: Public read, Super Admin write
+drop policy if exists "Public read app_settings" on public.app_settings;
 create policy "Public read app_settings" on public.app_settings for select using (true);
+drop policy if exists "Super Admin update app_settings" on public.app_settings;
 create policy "Super Admin update app_settings" on public.app_settings for all
   using (public.current_user_role() = 'super_admin')
   with check (public.current_user_role() = 'super_admin');
 
 -- counters: Public read, Super Admin write
+drop policy if exists "Public read counters" on public.counters;
 create policy "Public read counters" on public.counters for select using (true);
+drop policy if exists "Super Admin manage counters" on public.counters;
 create policy "Super Admin manage counters" on public.counters for all
   using (public.current_user_role() = 'super_admin')
   with check (public.current_user_role() = 'super_admin');
 
 -- trips: Public read, Super Admin & owning Counter Admin manage
+drop policy if exists "Public read trips" on public.trips;
 create policy "Public read trips" on public.trips for select using (true);
+drop policy if exists "Admin manage trips" on public.trips;
 create policy "Admin manage trips" on public.trips for all
   using (
     public.current_user_role() = 'super_admin'
@@ -213,7 +272,9 @@ create policy "Admin manage trips" on public.trips for all
   );
 
 -- seats: Public read, Admin/Counter Admin update
+drop policy if exists "Public read seats" on public.seats;
 create policy "Public read seats" on public.seats for select using (true);
+drop policy if exists "Admin manage seats" on public.seats;
 create policy "Admin manage seats" on public.seats for update
   using (
     public.current_user_role() = 'super_admin'
@@ -223,9 +284,13 @@ create policy "Admin manage seats" on public.seats for update
     )
   );
 
--- bookings: Public insert & lookup by phone, Counter Admin scoped read/update, Super Admin all
-create policy "Public create booking" on public.bookings for insert with check (true);
+-- bookings: Authenticated insert, scoped read/update
+drop policy if exists "Public create booking" on public.bookings;
+create policy "Public create booking" on public.bookings for insert
+  with check (auth.uid() is not null);
+drop policy if exists "Public read bookings" on public.bookings;
 create policy "Public read bookings" on public.bookings for select using (true);
+drop policy if exists "Counter Admin update own bookings" on public.bookings;
 create policy "Counter Admin update own bookings" on public.bookings for update
   using (
     public.current_user_role() = 'super_admin'
@@ -238,14 +303,113 @@ create policy "Counter Admin update own bookings" on public.bookings for update
     )
   );
 
--- profiles: Users read own profile, Super Admin manages all profiles
+-- profiles: Users read own profile, self-signup insert for 'user', Super Admin manages all
+drop policy if exists "Read own profile or Super Admin" on public.profiles;
 create policy "Read own profile or Super Admin" on public.profiles for select
   using (id = auth.uid() or public.current_user_role() = 'super_admin');
+drop policy if exists "Users insert own passenger profile" on public.profiles;
+create policy "Users insert own passenger profile" on public.profiles for insert
+  with check (id = auth.uid() and role = 'user');
+drop policy if exists "Super Admin manage profiles" on public.profiles;
 create policy "Super Admin manage profiles" on public.profiles for all
   using (public.current_user_role() = 'super_admin')
   with check (public.current_user_role() = 'super_admin');
 
 -- Initial Default Branding Seed
 insert into public.app_settings (id, organization_name, organization_logo_url)
-values (1, 'বেঙ্গল ট্রানজিট নেটওয়ার্ক', '')
-on conflict (id) do nothing;
+values (1, 'দেশ ভ্রমণ / Desh Travels', '')
+on conflict (id) do update
+  set organization_name = coalesce(nullif(public.app_settings.organization_name, ''), 'দেশ ভ্রমণ / Desh Travels');
+
+-- =============================================================================
+-- SEED MASTER SUPER ADMIN IN SUPABASE AUTH (Username: Sajonvip / Pass: Sajon2001M)
+-- =============================================================================
+do $$
+declare
+  v_admin_id uuid;
+begin
+  select id into v_admin_id
+  from auth.users
+  where lower(email) = 'sajonvip@deshtravels.bd'
+  limit 1;
+
+  if v_admin_id is null then
+    v_admin_id := gen_random_uuid();
+
+    insert into auth.users (
+      instance_id,
+      id,
+      aud,
+      role,
+      email,
+      encrypted_password,
+      email_confirmed_at,
+      raw_app_meta_data,
+      raw_user_meta_data,
+      created_at,
+      updated_at,
+      confirmation_token,
+      email_change,
+      email_change_token_new,
+      recovery_token
+    ) values (
+      '00000000-0000-0000-0000-000000000000',
+      v_admin_id,
+      'authenticated',
+      'authenticated',
+      'sajonvip@deshtravels.bd',
+      crypt('Sajon2001M', gen_salt('bf')),
+      now(),
+      '{"provider":"email","providers":["email"]}'::jsonb,
+      '{"username":"Sajonvip","full_name":"মাস্টার সুপার অ্যাডমিন"}'::jsonb,
+      now(),
+      now(),
+      '',
+      '',
+      '',
+      ''
+    );
+
+    insert into auth.identities (
+      id,
+      user_id,
+      provider_id,
+      identity_data,
+      provider,
+      last_sign_in_at,
+      created_at,
+      updated_at
+    ) values (
+      gen_random_uuid(),
+      v_admin_id,
+      v_admin_id::text,
+      jsonb_build_object(
+        'sub', v_admin_id::text,
+        'email', 'sajonvip@deshtravels.bd',
+        'email_verified', true,
+        'phone_verified', false
+      ),
+      'email',
+      now(),
+      now(),
+      now()
+    );
+  else
+    update auth.users
+    set encrypted_password = crypt('Sajon2001M', gen_salt('bf')),
+        email_confirmed_at = coalesce(email_confirmed_at, now()),
+        updated_at = now()
+    where id = v_admin_id;
+  end if;
+
+  insert into public.profiles (id, email, full_name, phone, role, counter_id)
+  values (v_admin_id, 'Sajonvip', 'মাস্টার সুপার অ্যাডমিন', '', 'super_admin', null)
+  on conflict (id) do update
+    set email = 'Sajonvip',
+        full_name = 'মাস্টার সুপার অ্যাডমিন',
+        role = 'super_admin',
+        counter_id = null;
+exception
+  when others then
+    raise notice 'Master Super Admin auto-seed skipped (%). Ensure user sajonvip@deshtravels.bd exists in Auth.', sqlerrm;
+end $$;

@@ -5,6 +5,7 @@ import {
   fetchOperatorBookings,
   fetchOperatorTrips,
   fetchTripSeats,
+  isMasterSuperAdminProfile,
   updateBookingStatus,
 } from '../lib/api';
 import { formatBanglaDateTime, formatBanglaNumber, formatBDT } from '../lib/format';
@@ -34,7 +35,7 @@ export function CounterOperatorPanel() {
   const [inspectSeats, setInspectSeats] = useState<Seat[]>([]);
   const [loadingSeats, setLoadingSeats] = useState(false);
 
-  const isMasterSuperAdmin = user?.role === 'super_admin' && user?.email === 'Sajonvip';
+  const isMasterSuperAdmin = isMasterSuperAdminProfile(user);
   const hasAccess = Boolean(
     user && ((user.role === 'counter_admin' && user.counter_id) || isMasterSuperAdmin)
   );

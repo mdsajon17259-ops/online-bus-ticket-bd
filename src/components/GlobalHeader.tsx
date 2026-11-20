@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Bus, Menu, X } from 'lucide-react';
 import { useApp, type ActivePanel } from '../context/AppContext';
+import { isMasterSuperAdminProfile } from '../lib/api';
 
 export function GlobalHeader() {
   const { settings, user, activePanel, setActivePanel, logout } = useApp();
@@ -18,7 +19,7 @@ export function GlobalHeader() {
   };
 
   const dashboardTarget: ActivePanel | null =
-    user?.role === 'super_admin' && user.email === 'Sajonvip'
+    isMasterSuperAdminProfile(user)
       ? 'admin'
       : user?.role === 'counter_admin'
         ? 'operator'
