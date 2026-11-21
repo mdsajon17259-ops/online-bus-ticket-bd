@@ -1,0 +1,38 @@
+name: Supabase Keep-Alive Ping
+
+on:
+  schedule:
+    # Runs every 3 days at 00:00 UTC to prevent Supabase free-tier inactivity pause
+    - cron: '0 0 */3 * *'
+  workflow_dispatch:
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST API
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "Error: SUPABASE_URL and SUPABASE_ANON_KEY repository secrets must be configured."
+            exit 1
+          fi
+
+          BASE_URL="${SUPABASE_URL%/}"
+          HTTP_STATUS=$(curl -sS -o /tmp/supabase_ping.json -w "%{http_code}" \
+            "${BASE_URL}/rest/v1/app_settings?select=id&limit=1" \
+            -H "apikey: ${SUPABASE_ANON_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_ANON_KEY}")
+
+          echo "HTTP Status: ${HTTP_STATUS}"
+          cat /tmp/supabase_ping.json
+          echo ""
+
+          if [ "$HTTP_STATUS" -lt 200 ] || [ "$HTTP_STATUS" -ge 300 ]; then
+            echo "Supabase keep-alive ping failed!"
+            exit 1
+          fi
+
+          echo "Supabase keep-alive succeeded at $(date -u +"%Y-%m-%dT%H:%M:%SZ")"

@@ -431,12 +431,87 @@ function requireOperatorOrAdmin(req: AuthedRequest, res: Response, next: NextFun
 
 async function startServer() {
   const app = express();
+
+  // Normalize API URLs across WebViews, proxies, duplicate slashes, and subpath prefixes
+  app.use((req, _res, next) => {
+    const qIndex = req.url.indexOf('?');
+    const rawPath = qIndex >= 0 ? req.url.slice(0, qIndex) : req.url;
+    const rawQuery = qIndex >= 0 ? req.url.slice(qIndex) : '';
+
+    let normalizedPath = rawPath.replace(/\/{2,}/g, '/');
+    const apiMatch = normalizedPath.match(/^(?:.*?)\/(api(?:\/.*)?)$/i);
+    if (apiMatch) {
+      normalizedPath = `/${apiMatch[1].replace(/^api/i, 'api')}`;
+    }
+    if (normalizedPath.startsWith('/api/') && normalizedPath.length > 5 && normalizedPath.endsWith('/')) {
+      normalizedPath = normalizedPath.slice(0, -1);
+    }
+
+    req.url = `${normalizedPath}${rawQuery}`;
+    next();
+  });
+
+  // Allow cross-origin & WebView requests (e.g. file://, capacitor://, appassets, custom domains)
+  app.use('/api', (req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin && origin !== 'null') {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Requested-With');
+    if (req.method === 'OPTIONS') {
+      res.status(204).end();
+      return;
+    }
+    next();
+  });
+
   app.use(express.json({ limit: '6mb' }));
   app.use(attachUser);
 
   // ===========================================================================
   // PUBLIC ENDPOINTS
   // ===========================================================================
+
+  const handleKeepAlive = async (_req: express.Request, res: express.Response) => {
+    const timestamp = new Date().toISOString();
+    const supabaseUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
+    const supabaseKey = (process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '').trim();
+
+    try {
+      if (supabaseUrl.startsWith('http') && supabaseKey) {
+        const endpoint = `${supabaseUrl.replace(/\/+$/, '')}/rest/v1/app_settings?select=id&limit=1`;
+        const response = await fetch(endpoint, {
+          method: 'GET',
+          headers: {
+            apikey: supabaseKey,
+            Authorization: `Bearer ${supabaseKey}`,
+          },
+          signal: AbortSignal.timeout(8000),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Supabase keep-alive failed with HTTP ${response.status}`);
+        }
+
+        res.status(200).json({ status: 'ok', timestamp, target: 'supabase' });
+        return;
+      }
+
+      db.prepare('SELECT id FROM app_settings WHERE id = 1').get();
+      res.status(200).json({ status: 'ok', timestamp, target: 'sqlite' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Keep-alive check failed';
+      res.status(502).json({ status: 'error', timestamp, error: message });
+    }
+  };
+
+  app.get('/api/ping', handleKeepAlive);
+  app.get('/api/keep-alive', handleKeepAlive);
 
   app.get('/api/settings', (_req, res) => {
     const settings = db.prepare('SELECT * FROM app_settings WHERE id = 1').get();
@@ -678,9 +753,14 @@ async function startServer() {
   // AUTHENTICATION ENDPOINTS
   // ===========================================================================
 
-  app.post('/api/auth/login', (req, res) => {
-    const { email, password } = req.body as { email?: string; password?: string };
-    const identifier = (email || '').trim();
+  const handleLogin = (req: Request, res: Response) => {
+    const { email, username, identifier: rawIdentifier, password } = req.body as {
+      email?: string;
+      username?: string;
+      identifier?: string;
+      password?: string;
+    };
+    const identifier = (email || username || rawIdentifier || '').trim();
     if (!identifier || !password) {
       res.status(400).json({ error: 'ইউজারনেম/মোবাইল নম্বর এবং পাসওয়ার্ড দিন' });
       return;
@@ -746,9 +826,11 @@ async function startServer() {
         counter_name: row.counter_name,
       },
     });
-  });
+  };
 
-  app.post('/api/auth/register', (req, res) => {
+  app.post(['/api/auth/login', '/api/login'], handleLogin);
+
+  const handleRegister = (req: Request, res: Response) => {
     const { email, password, full_name, phone } = req.body as {
       email?: string;
       password?: string;
@@ -802,9 +884,11 @@ async function startServer() {
         counter_name: null,
       },
     });
-  });
+  };
 
-  app.get('/api/auth/me', requireAuth, (req: AuthedRequest, res) => {
+  app.post(['/api/auth/register', '/api/register'], handleRegister);
+
+  const handleMe = (req: AuthedRequest, res: Response) => {
     const row = db
       .prepare(`
         SELECT p.id, p.email, p.full_name, p.phone, p.role, p.counter_id, p.created_at, c.counter_name
@@ -814,7 +898,9 @@ async function startServer() {
       `)
       .get(req.user!.id);
     res.json(row);
-  });
+  };
+
+  app.get(['/api/auth/me', '/api/me'], requireAuth, handleMe);
 
   // ===========================================================================
   // COUNTER OPERATOR ENDPOINTS (Strictly scoped to req.user.counter_id)
@@ -1297,6 +1383,11 @@ async function startServer() {
     }
     db.prepare("DELETE FROM profiles WHERE id = ? AND role != 'super_admin'").run(req.params.id);
     res.json({ success: true });
+  });
+
+  // Return JSON 404 for unmatched /api/* endpoints instead of falling through to SPA HTML
+  app.use('/api', (req, res) => {
+    res.status(404).json({ error: `API রুট পাওয়া যায়নি: ${req.method} ${req.originalUrl}` });
   });
 
   // ===========================================================================

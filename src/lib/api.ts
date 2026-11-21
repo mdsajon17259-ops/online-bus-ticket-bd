@@ -12,6 +12,8 @@ import type {
 } from '../types';
 
 const TOKEN_KEY = 'transit_auth_token';
+const API_BASE_STORAGE_KEY = 'desh_travels_api_base_url';
+let memoryAuthToken: string | null = null;
 
 export const MASTER_ADMIN_USERNAME = 'Sajonvip';
 const MASTER_ADMIN_PASSWORD = 'Sajon2001M';
@@ -62,13 +64,14 @@ function mapSupabaseProfile(row: Record<string, unknown>): Profile {
 
 export function getAuthToken(): string | null {
   try {
-    return localStorage.getItem(TOKEN_KEY);
+    return localStorage.getItem(TOKEN_KEY) || memoryAuthToken;
   } catch {
-    return null;
+    return memoryAuthToken;
   }
 }
 
 export function setAuthToken(token: string | null): void {
+  memoryAuthToken = token;
   try {
     if (token) {
       localStorage.setItem(TOKEN_KEY, token);
@@ -76,13 +79,111 @@ export function setAuthToken(token: string | null): void {
       localStorage.removeItem(TOKEN_KEY);
     }
   } catch {
-    // Ignore storage quota errors
+    // Ignore storage errors in restricted WebViews; memoryAuthToken remains active
   }
+}
+
+function getConfiguredApiBase(): string {
+  const envBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
+  if (envBase) return envBase.replace(/\/+$/, '');
+
+  if (typeof window !== 'undefined') {
+    const globalBase = (window as unknown as { __API_BASE_URL__?: string }).__API_BASE_URL__?.trim();
+    if (globalBase) return globalBase.replace(/\/+$/, '');
+
+    const metaBase = document
+      .querySelector('meta[name="api-base-url"]')
+      ?.getAttribute('content')
+      ?.trim();
+    if (metaBase) return metaBase.replace(/\/+$/, '');
+
+    try {
+      const storedBase = localStorage.getItem(API_BASE_STORAGE_KEY)?.trim();
+      if (storedBase) return storedBase.replace(/\/+$/, '');
+    } catch {
+      // Ignore storage access errors in restricted WebViews
+    }
+  }
+
+  return '';
+}
+
+function buildApiCandidateUrls(endpoint: string): string[] {
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  const relativePath = cleanEndpoint.replace(/^\/+/, '');
+  const candidates: string[] = [];
+
+  const addCandidate = (url: string) => {
+    const trimmed = url.trim();
+    if (trimmed && !candidates.includes(trimmed)) {
+      candidates.push(trimmed);
+    }
+  };
+
+  const configuredBase = getConfiguredApiBase();
+  if (configuredBase) {
+    const normalizedBase = configuredBase.endsWith('/api')
+      ? configuredBase.slice(0, -4)
+      : configuredBase;
+    addCandidate(`${normalizedBase}${cleanEndpoint}`);
+    return candidates;
+  }
+
+  if (typeof window === 'undefined') {
+    addCandidate(cleanEndpoint);
+    return candidates;
+  }
+
+  const { protocol, origin, pathname, href } = window.location;
+  const isHttp = protocol === 'http:' || protocol === 'https:';
+
+  if (isHttp) {
+    // 1. Resolve relative to current document base (works on subpaths and /app/index.html)
+    try {
+      const baseDir = new URL('.', document.baseURI || href);
+      addCandidate(new URL(relativePath, baseDir).toString());
+    } catch {
+      // Ignore URL parse error
+    }
+
+    // 2. If running under a subpath without trailing slash (e.g. https://host/desh-travels)
+    if (pathname && pathname !== '/' && !pathname.endsWith('/')) {
+      const lastSegment = pathname.split('/').pop() || '';
+      if (!lastSegment.includes('.')) {
+        try {
+          const subpathDir = `${origin}${pathname}/`;
+          addCandidate(new URL(relativePath, subpathDir).toString());
+        } catch {
+          // Ignore URL parse error
+        }
+      }
+    }
+
+    // 3. Vite BASE_URL if configured as a non-root subpath
+    const viteBase = (import.meta.env.BASE_URL as string | undefined) || '/';
+    if (viteBase && viteBase !== '/' && viteBase !== './') {
+      try {
+        addCandidate(new URL(relativePath, new URL(viteBase, origin)).toString());
+      } catch {
+        // Ignore URL parse error
+      }
+    }
+
+    // 4. Origin root fallback (standard root deployment)
+    addCandidate(`${origin}${cleanEndpoint}`);
+  } else {
+    // file://, capacitor://, or custom WebView scheme fallback
+    addCandidate(cleanEndpoint);
+    addCandidate(`./${relativePath}`);
+  }
+
+  return candidates;
 }
 
 async function apiFetch<T>(url: string, options: RequestInit = {}): Promise<T> {
   const token = getAuthToken();
   const headers: Record<string, string> = {
+    Accept: 'application/json',
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> | undefined),
   };
@@ -90,12 +191,44 @@ async function apiFetch<T>(url: string, options: RequestInit = {}): Promise<T> {
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const res = await fetch(url, { ...options, headers });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error((data as { error?: string }).error || `অনুরোধ ব্যর্থ হয়েছে (${res.status})`);
+  const candidates = buildApiCandidateUrls(url);
+
+  for (let i = 0; i < candidates.length; i++) {
+    const targetUrl = candidates[i];
+    const isLast = i === candidates.length - 1;
+
+    let res: Response;
+    try {
+      res = await fetch(targetUrl, {
+        ...options,
+        headers,
+        credentials: options.credentials ?? 'same-origin',
+      });
+    } catch (networkErr) {
+      if (!isLast) continue;
+      throw networkErr instanceof Error
+        ? networkErr
+        : new Error('সার্ভারের সাথে সংযোগ স্থাপন করা যায়নি');
+    }
+
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
+    const isHtmlFallback = contentType.includes('text/html');
+
+    if ((res.status === 404 || isHtmlFallback) && !isLast) {
+      continue;
+    }
+
+    const data = isHtmlFallback ? {} : await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error((data as { error?: string }).error || `অনুরোধ ব্যর্থ হয়েছে (${res.status})`);
+    }
+    if (isHtmlFallback) {
+      throw new Error('অনুরোধ ব্যর্থ হয়েছে (404)');
+    }
+    return data as T;
   }
-  return data as T;
+
+  throw new Error('অনুরোধ ব্যর্থ হয়েছে (404)');
 }
 
 // =============================================================================
