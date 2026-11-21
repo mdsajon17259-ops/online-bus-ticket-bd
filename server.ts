@@ -1390,6 +1390,17 @@ async function startServer() {
     res.status(404).json({ error: `API রুট পাওয়া যায়নি: ${req.method} ${req.originalUrl}` });
   });
 
+  // Ensure unexpected errors on /api/* always return readable JSON string error messages
+  app.use('/api', (err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    const message =
+      err instanceof Error && err.message && err.message !== '[object Object]'
+        ? err.message
+        : typeof err === 'string' && err.trim()
+          ? err.trim()
+          : 'সার্ভারে একটি অপ্রত্যাশিত ত্রুটি ঘটেছে';
+    res.status(500).json({ error: message });
+  });
+
   // ===========================================================================
   // VITE / STATIC SERVING
   // ===========================================================================

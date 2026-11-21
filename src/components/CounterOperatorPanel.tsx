@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Bus, Check, Eye, RefreshCw, Search, X } from 'lucide-react';
 import {
+  extractErrorMessage,
   fetchCounters,
   fetchOperatorBookings,
   fetchOperatorTrips,
@@ -59,7 +60,7 @@ export function CounterOperatorPanel() {
         setCounters(cData);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'কাউন্টারের তথ্য লোড করা যায়নি');
+      setError(extractErrorMessage(err, 'কাউন্টারের তথ্য লোড করা যায়নি'));
     } finally {
       setLoading(false);
     }
@@ -76,7 +77,7 @@ export function CounterOperatorPanel() {
       await updateBookingStatus(bookingId, nextStatus);
       await loadData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'বুকিং স্ট্যাটাস পরিবর্তন করা যায়নি');
+      setError(extractErrorMessage(err, 'বুকিং স্ট্যাটাস পরিবর্তন করা যায়নি'));
     } finally {
       setActionId(null);
     }

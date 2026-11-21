@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Bus, KeyRound, Lock, Phone, ShieldCheck, Ticket, User } from 'lucide-react';
 import { useApp, type ActivePanel } from '../context/AppContext';
-import { isMasterSuperAdminProfile } from '../lib/api';
+import { extractErrorMessage, isMasterSuperAdminProfile } from '../lib/api';
 
 interface AuthScreenProps {
   requiredRole?: 'counter_admin' | 'super_admin';
@@ -51,7 +51,7 @@ export function AuthScreen({
         setActivePanel('passenger');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'লগইন সম্পন্ন করা যায়নি');
+      setError(extractErrorMessage(err, 'লগইন সম্পন্ন করা যায়নি'));
     } finally {
       setLoading(false);
     }
@@ -191,6 +191,9 @@ export function AuthScreen({
                     id="auth-identifier"
                     type="text"
                     required
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
                     value={identifier}
                     onChange={(e) => setIdentifier(e.target.value)}
                     placeholder="ইউজারনেম বা মোবাইল নম্বর লিখুন"

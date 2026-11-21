@@ -19,6 +19,7 @@ import {
   deleteAdminUser,
   deleteCounter,
   deleteTrip,
+  extractErrorMessage,
   fetchAdminBookings,
   fetchAdminOverview,
   fetchAllUsers,
@@ -118,7 +119,7 @@ export function SuperAdminPanel() {
         setUCounterId((prev) => prev || cList[0].id);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'অ্যাডমিন প্যানেলের তথ্য লোড করা যায়নি');
+      setError(extractErrorMessage(err, 'অ্যাডমিন প্যানেলের তথ্য লোড করা যায়নি'));
     } finally {
       setLoading(false);
     }
@@ -174,7 +175,7 @@ export function SuperAdminPanel() {
       await refreshSettings();
       showNotice('প্রতিষ্ঠানের নাম ও লোগো সফলভাবে আপডেট করা হয়েছে।');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'সেটিংস সংরক্ষণ করা যায়নি');
+      setError(extractErrorMessage(err, 'সেটিংস সংরক্ষণ করা যায়নি'));
     } finally {
       setSavingSettings(false);
     }
@@ -202,7 +203,7 @@ export function SuperAdminPanel() {
       await loadAdminData();
       showNotice('নতুন বাস কাউন্টার ও অপারেটর অ্যাকাউন্ট সফলভাবে তৈরি হয়েছে।');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'কাউন্টার তৈরি করা যায়নি');
+      setError(extractErrorMessage(err, 'কাউন্টার তৈরি করা যায়নি'));
     } finally {
       setCreatingCounter(false);
     }
@@ -227,7 +228,7 @@ export function SuperAdminPanel() {
       await loadAdminData();
       showNotice('নতুন ট্রিপ প্রকাশ করা হয়েছে এবং আসন তৈরি হয়েছে।');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'ট্রিপ তৈরি করা যায়নি');
+      setError(extractErrorMessage(err, 'ট্রিপ তৈরি করা যায়নি'));
     } finally {
       setCreatingTrip(false);
     }
@@ -253,7 +254,7 @@ export function SuperAdminPanel() {
       await loadAdminData();
       showNotice('নতুন কাউন্টার অপারেটর/ব্যবহারকারী অ্যাকাউন্ট তৈরি হয়েছে।');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'ব্যবহারকারী তৈরি করা যায়নি');
+      setError(extractErrorMessage(err, 'ব্যবহারকারী তৈরি করা যায়নি'));
     } finally {
       setCreatingUser(false);
     }
@@ -266,7 +267,7 @@ export function SuperAdminPanel() {
       await loadAdminData();
       showNotice('ব্যবহারকারীর অনুমতি আপডেট করা হয়েছে।');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'রোল পরিবর্তন করা যায়নি');
+      setError(extractErrorMessage(err, 'রোল পরিবর্তন করা যায়নি'));
     }
   };
 

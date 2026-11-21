@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import {
   createBooking,
+  extractErrorMessage,
   fetchCounters,
   fetchMyBookings,
   fetchTripSeats,
@@ -89,7 +90,7 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
         });
         setTrips(data);
       } catch (err) {
-        setTripsError(err instanceof Error ? err.message : 'বাসের সময়সূচি লোড করা যায়নি');
+        setTripsError(extractErrorMessage(err, 'বাসের সময়সূচি লোড করা যায়নি'));
       } finally {
         setLoadingTrips(false);
       }
@@ -162,7 +163,7 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
       const seats = await fetchTripSeats(trip.id);
       setTripSeats(seats);
     } catch (err) {
-      setBookingError(err instanceof Error ? err.message : 'আসনের তালিকা লোড করা যায়নি');
+      setBookingError(extractErrorMessage(err, 'আসনের তালিকা লোড করা যায়নি'));
     } finally {
       setLoadingSeats(false);
     }
@@ -226,7 +227,7 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
       const [freshSeats] = await Promise.all([fetchTripSeats(activeTrip.id), loadTrips()]);
       setTripSeats(freshSeats);
     } catch (err) {
-      setBookingError(err instanceof Error ? err.message : 'বুকিং অনুরোধ পাঠানো যায়নি');
+      setBookingError(extractErrorMessage(err, 'বুকিং অনুরোধ পাঠানো যায়নি'));
     } finally {
       setSubmittingBooking(false);
     }
@@ -241,7 +242,7 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
       const data = await lookupBookings(lookupQuery.trim());
       setLookupResults(data);
     } catch (err) {
-      setLookupError(err instanceof Error ? err.message : 'টিকেট খোঁজা সম্ভব হয়নি');
+      setLookupError(extractErrorMessage(err, 'টিকেট খোঁজা সম্ভব হয়নি'));
     } finally {
       setLookupLoading(false);
     }
@@ -1059,6 +1060,9 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
                                   id="ql-id"
                                   type="text"
                                   required
+                                  autoCapitalize="none"
+                                  autoCorrect="off"
+                                  spellCheck={false}
                                   value={loginIdentifier}
                                   onChange={(e) => setLoginIdentifier(e.target.value)}
                                   placeholder="01711223344"

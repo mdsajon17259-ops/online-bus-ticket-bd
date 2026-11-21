@@ -108,6 +108,76 @@ function getConfiguredApiBase(): string {
   return '';
 }
 
+export function extractErrorMessage(
+  err: unknown,
+  fallback = 'অনুরোধ সম্পন্ন করা যায়নি',
+  depth = 0
+): string {
+  if (depth > 4 || err === null || err === undefined) {
+    return fallback;
+  }
+
+  if (typeof err === 'string') {
+    const trimmed = err.trim();
+    if (!trimmed || trimmed === '[object Object]') {
+      return fallback;
+    }
+    return trimmed;
+  }
+
+  if (typeof err === 'number' || typeof err === 'boolean') {
+    return String(err);
+  }
+
+  if (err instanceof Error) {
+    const msg = typeof err.message === 'string' ? err.message.trim() : '';
+    if (msg && msg !== '[object Object]') {
+      return msg;
+    }
+    const extra = err as unknown as Record<string, unknown>;
+    if (extra.error !== undefined) {
+      return extractErrorMessage(extra.error, fallback, depth + 1);
+    }
+    if (extra.cause !== undefined) {
+      return extractErrorMessage(extra.cause, fallback, depth + 1);
+    }
+    return fallback;
+  }
+
+  if (typeof err === 'object') {
+    const obj = err as Record<string, unknown>;
+    const priorityKeys = [
+      'error_description',
+      'msg',
+      'message',
+      'error',
+      'detail',
+      'details',
+      'reason',
+      'statusText',
+    ];
+
+    for (const key of priorityKeys) {
+      const val = obj[key];
+      if (val !== undefined && val !== null) {
+        const extracted = extractErrorMessage(val, '', depth + 1);
+        if (extracted && extracted !== '[object Object]') {
+          return extracted;
+        }
+      }
+    }
+
+    if (Array.isArray(obj.errors) && obj.errors.length > 0) {
+      const extracted = extractErrorMessage(obj.errors[0], '', depth + 1);
+      if (extracted && extracted !== '[object Object]') {
+        return extracted;
+      }
+    }
+  }
+
+  return fallback;
+}
+
 function buildApiCandidateUrls(endpoint: string): string[] {
   const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
   const relativePath = cleanEndpoint.replace(/^\/+/, '');
@@ -135,7 +205,7 @@ function buildApiCandidateUrls(endpoint: string): string[] {
   }
 
   const { protocol, origin, pathname, href } = window.location;
-  const isHttp = protocol === 'http:' || protocol === 'https:';
+  const isHttp = (protocol === 'http:' || protocol === 'https:') && origin !== 'null';
 
   if (isHttp) {
     // 1. Resolve relative to current document base (works on subpaths and /app/index.html)
@@ -172,7 +242,16 @@ function buildApiCandidateUrls(endpoint: string): string[] {
     // 4. Origin root fallback (standard root deployment)
     addCandidate(`${origin}${cleanEndpoint}`);
   } else {
-    // file://, capacitor://, or custom WebView scheme fallback
+    // file://, capacitor://, about:srcdoc, or custom WebView scheme fallback
+    if (typeof document !== 'undefined' && document.referrer.startsWith('http')) {
+      try {
+        const refBase = new URL('.', document.referrer);
+        addCandidate(new URL(relativePath, refBase).toString());
+        addCandidate(`${new URL(document.referrer).origin}${cleanEndpoint}`);
+      } catch {
+        // Ignore invalid referrer URL
+      }
+    }
     addCandidate(cleanEndpoint);
     addCandidate(`./${relativePath}`);
   }
@@ -206,26 +285,30 @@ async function apiFetch<T>(url: string, options: RequestInit = {}): Promise<T> {
       });
     } catch (networkErr) {
       if (!isLast) continue;
-      throw networkErr instanceof Error
-        ? networkErr
-        : new Error('সার্ভারের সাথে সংযোগ স্থাপন করা যায়নি');
+      throw new Error(
+        extractErrorMessage(networkErr, 'সার্ভারের সাথে সংযোগ স্থাপন করা যায়নি')
+      );
     }
 
     const contentType = (res.headers.get('content-type') || '').toLowerCase();
     const isHtmlFallback = contentType.includes('text/html');
 
-    if ((res.status === 404 || isHtmlFallback) && !isLast) {
+    if ((res.status === 404 || res.status === 405 || isHtmlFallback) && !isLast) {
       continue;
     }
 
-    const data = isHtmlFallback ? {} : await res.json().catch(() => ({}));
+    const data: unknown = isHtmlFallback ? null : await res.json().catch(() => null);
     if (!res.ok) {
-      throw new Error((data as { error?: string }).error || `অনুরোধ ব্যর্থ হয়েছে (${res.status})`);
+      const fallbackMsg =
+        res.status === 404
+          ? 'অনুরোধ ব্যর্থ হয়েছে (404) — API রুট পাওয়া যায়নি'
+          : `অনুরোধ ব্যর্থ হয়েছে (${res.status})`;
+      throw new Error(extractErrorMessage(data, fallbackMsg));
     }
     if (isHtmlFallback) {
-      throw new Error('অনুরোধ ব্যর্থ হয়েছে (404)');
+      throw new Error('অনুরোধ ব্যর্থ হয়েছে (404) — সার্ভার থেকে সঠিক JSON উত্তর পাওয়া যায়নি');
     }
-    return data as T;
+    return (data ?? {}) as T;
   }
 
   throw new Error('অনুরোধ ব্যর্থ হয়েছে (404)');
@@ -242,7 +325,7 @@ export async function fetchAppSettings(): Promise<AppSettings> {
       .select('*')
       .eq('id', 1)
       .single();
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
     return data as AppSettings;
   }
   return apiFetch<AppSettings>('/api/settings');
@@ -254,7 +337,7 @@ export async function fetchCounters(): Promise<Counter[]> {
       .from('counters')
       .select('*')
       .order('counter_name', { ascending: true });
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
     return (data || []) as Counter[];
   }
   return apiFetch<Counter[]>('/api/counters');
@@ -288,7 +371,7 @@ export async function fetchTrips(filters?: {
     }
 
     const { data, error } = await query;
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
 
     return (data || []).map((row: Record<string, unknown>) => {
       const c = row.counters as { counter_name?: string; logo_url?: string } | null;
@@ -325,7 +408,7 @@ export async function fetchTripSeats(tripId: string): Promise<Seat[]> {
       .from('seats')
       .select('*')
       .eq('trip_id', tripId);
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
     return ((data || []) as Seat[]).sort((a, b) => {
       const numA = parseInt(a.seat_number.slice(1), 10);
       const numB = parseInt(b.seat_number.slice(1), 10);
@@ -351,7 +434,7 @@ export async function createBooking(payload: {
       p_boarding_point: payload.boarding_point,
       p_selected_seats: payload.selected_seats,
     });
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
     return data as Booking;
   }
   return apiFetch<Booking>('/api/bookings', {
@@ -383,7 +466,7 @@ export async function fetchMyBookings(): Promise<Booking[]> {
     }
 
     const { data, error } = await query;
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
     return (data || []).map(mapSupabaseBooking);
   }
   return apiFetch<Booking[]>('/api/bookings/my');
@@ -397,7 +480,7 @@ export async function lookupBookings(query: string): Promise<Booking[]> {
       .select('*, trips(route_from, route_to, departure_time, bus_type, price, counter_id, counters(counter_name))')
       .or(`phone.ilike.%${clean}%,id.eq.${clean}`)
       .order('created_at', { ascending: false });
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
     return (data || []).map(mapSupabaseBooking);
   }
   return apiFetch<Booking[]>(`/api/bookings/lookup?q=${encodeURIComponent(query)}`);
@@ -564,7 +647,7 @@ export async function registerPassenger(payload: {
         },
       },
     });
-    if (error || !data.user) throw new Error(error?.message || 'নিবন্ধন সম্পন্ন হয়নি');
+    if (error || !data.user) throw new Error(extractErrorMessage(error, 'নিবন্ধন সম্পন্ন হয়নি'));
 
     await supabase.from('profiles').upsert({
       id: data.user.id,
@@ -661,7 +744,7 @@ export async function fetchOperatorBookings(counterId?: string): Promise<Booking
       query.eq('trips.counter_id', counterId);
     }
     const { data, error } = await query;
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
     return (data || []).map(mapSupabaseBooking);
   }
   const qs = counterId ? `?counter_id=${encodeURIComponent(counterId)}` : '';
@@ -678,7 +761,7 @@ export async function updateBookingStatus(
       .select('*')
       .eq('id', bookingId)
       .single();
-    if (fetchErr || !booking) throw new Error(fetchErr?.message || 'বুকিং পাওয়া যায়নি');
+    if (fetchErr || !booking) throw new Error(extractErrorMessage(fetchErr, 'বুকিং পাওয়া যায়নি'));
 
     const seats = booking.selected_seats as string[];
     if (status === 'cancelled' && booking.status !== 'cancelled') {
@@ -699,7 +782,7 @@ export async function updateBookingStatus(
       .from('bookings')
       .update({ status })
       .eq('id', bookingId);
-    if (updErr) throw new Error(updErr.message);
+    if (updErr) throw new Error(extractErrorMessage(updErr, 'স্ট্যাটাস আপডেট করা যায়নি'));
     return { id: bookingId, status };
   }
 
@@ -731,7 +814,7 @@ export async function updateAppSettings(payload: {
       .eq('id', 1)
       .select()
       .single();
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
     return data as AppSettings;
   }
 
@@ -828,7 +911,7 @@ export async function createCounter(payload: {
       })
       .select()
       .single();
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
     const createdCounter = data as Counter;
 
     const ephemeral = createEphemeralSupabaseClient();
@@ -849,7 +932,7 @@ export async function createCounter(payload: {
 
     if (opAuthErr || !opAuth.user) {
       await supabase.from('counters').delete().eq('id', createdCounter.id);
-      throw new Error(opAuthErr?.message || 'অপারেটর অ্যাকাউন্ট তৈরি করা যায়নি');
+      throw new Error(extractErrorMessage(opAuthErr, 'অপারেটর অ্যাকাউন্ট তৈরি করা যায়নি'));
     }
 
     const { error: profErr } = await supabase.from('profiles').insert({
@@ -862,7 +945,7 @@ export async function createCounter(payload: {
     });
     if (profErr) {
       await supabase.from('counters').delete().eq('id', createdCounter.id);
-      throw new Error(profErr.message);
+      throw new Error(extractErrorMessage(profErr, 'অপারেটর প্রোফাইল সংরক্ষণ করা যায়নি'));
     }
 
     return createdCounter;
@@ -878,7 +961,7 @@ export async function deleteCounter(id: string): Promise<void> {
   if (isSupabaseConfigured && supabase) {
     await supabase.from('profiles').delete().eq('counter_id', id).eq('role', 'counter_admin');
     const { error } = await supabase.from('counters').delete().eq('id', id);
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
     return;
   }
   await apiFetch(`/api/admin/counters/${encodeURIComponent(id)}`, { method: 'DELETE' });
@@ -895,7 +978,7 @@ export async function createTrip(payload: {
 }): Promise<Trip> {
   if (isSupabaseConfigured && supabase) {
     const { data, error } = await supabase.from('trips').insert(payload).select().single();
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
     return data as Trip;
   }
   return apiFetch<Trip>('/api/admin/trips', {
@@ -907,7 +990,7 @@ export async function createTrip(payload: {
 export async function deleteTrip(id: string): Promise<void> {
   if (isSupabaseConfigured && supabase) {
     const { error } = await supabase.from('trips').delete().eq('id', id);
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
     return;
   }
   await apiFetch(`/api/admin/trips/${encodeURIComponent(id)}`, { method: 'DELETE' });
@@ -920,7 +1003,7 @@ export async function fetchAllUsers(): Promise<Profile[]> {
       .select('*, counters(counter_name)')
       .neq('role', 'super_admin')
       .order('created_at', { ascending: false });
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
     return (data || []).map((p) => mapSupabaseProfile(p as Record<string, unknown>));
   }
   return apiFetch<Profile[]>('/api/admin/users');
@@ -963,7 +1046,7 @@ export async function createAdminUser(payload: {
         },
       },
     });
-    if (error || !data.user) throw new Error(error?.message || 'ব্যবহারকারী তৈরি করা যায়নি');
+    if (error || !data.user) throw new Error(extractErrorMessage(error, 'ব্যবহারকারী তৈরি করা যায়নি'));
 
     const { data: profile, error: profErr } = await supabase
       .from('profiles')
@@ -977,7 +1060,7 @@ export async function createAdminUser(payload: {
       })
       .select('*, counters(counter_name)')
       .single();
-    if (profErr) throw new Error(profErr.message);
+    if (profErr) throw new Error(extractErrorMessage(profErr, 'ব্যবহারকারীর প্রোফাইল তৈরি করা যায়নি'));
     return mapSupabaseProfile(profile as Record<string, unknown>);
   }
   return apiFetch<Profile>('/api/admin/users', {
@@ -1006,7 +1089,7 @@ export async function updateUserRole(
       .neq('role', 'super_admin')
       .select('*, counters(counter_name)')
       .single();
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
     return mapSupabaseProfile(data as Record<string, unknown>);
   }
   return apiFetch<Profile>(`/api/admin/users/${encodeURIComponent(id)}`, {
@@ -1022,7 +1105,7 @@ export async function deleteAdminUser(id: string): Promise<void> {
       .delete()
       .eq('id', id)
       .neq('role', 'super_admin');
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
     return;
   }
   await apiFetch(`/api/admin/users/${encodeURIComponent(id)}`, { method: 'DELETE' });

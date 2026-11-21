@@ -9,11 +9,40 @@ export const isSupabaseConfigured = Boolean(
   supabaseUrl.startsWith('http')
 );
 
+const memoryStorage = new Map<string, string>();
+
+const safeStorage = {
+  getItem: (key: string): string | null => {
+    try {
+      return window.localStorage.getItem(key) ?? memoryStorage.get(key) ?? null;
+    } catch {
+      return memoryStorage.get(key) ?? null;
+    }
+  },
+  setItem: (key: string, value: string): void => {
+    memoryStorage.set(key, value);
+    try {
+      window.localStorage.setItem(key, value);
+    } catch {
+      // Ignore storage restrictions in WebView
+    }
+  },
+  removeItem: (key: string): void => {
+    memoryStorage.delete(key);
+    try {
+      window.localStorage.removeItem(key);
+    } catch {
+      // Ignore storage restrictions in WebView
+    }
+  },
+};
+
 export const supabase: SupabaseClient | null = isSupabaseConfigured
   ? createClient(supabaseUrl!, supabaseAnonKey!, {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
+        storage: typeof window !== 'undefined' ? safeStorage : undefined,
       },
     })
   : null;
