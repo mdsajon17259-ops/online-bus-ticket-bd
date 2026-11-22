@@ -2,11 +2,35 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import fs from 'fs';
 import path from 'path';
-import {defineConfig} from 'vite';
+import {defineConfig, loadEnv} from 'vite';
 
-export default defineConfig(() => {
+export default defineConfig(({mode}) => {
+  const fileEnv = loadEnv(mode, process.cwd(), '');
+  const env = {...fileEnv, ...process.env};
+
+  const resolvedSupabaseUrl = (
+    env.VITE_SUPABASE_URL ||
+    env.NEXT_PUBLIC_SUPABASE_URL ||
+    env.SUPABASE_URL ||
+    ''
+  ).trim();
+
+  const resolvedSupabaseAnonKey = (
+    env.VITE_SUPABASE_ANON_KEY ||
+    env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    env.SUPABASE_ANON_KEY ||
+    env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+    env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    env.SUPABASE_PUBLISHABLE_KEY ||
+    ''
+  ).trim();
+
   return {
     base: './',
+    define: {
+      __APP_SUPABASE_URL__: JSON.stringify(resolvedSupabaseUrl),
+      __APP_SUPABASE_ANON_KEY__: JSON.stringify(resolvedSupabaseAnonKey),
+    },
     plugins: [
       react(),
       tailwindcss(),

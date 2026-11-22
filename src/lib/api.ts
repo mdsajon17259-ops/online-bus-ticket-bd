@@ -1,4 +1,9 @@
-import { createEphemeralSupabaseClient, isSupabaseConfigured, supabase } from './supabase';
+import {
+  createEphemeralSupabaseClient,
+  ensureSupabaseClient,
+  isSupabaseConfigured,
+  supabase,
+} from './supabase';
 import type {
   AdminOverview,
   AppSettings,
@@ -319,6 +324,7 @@ async function apiFetch<T>(url: string, options: RequestInit = {}): Promise<T> {
 // =============================================================================
 
 export async function fetchAppSettings(): Promise<AppSettings> {
+  await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     const { data, error } = await supabase
       .from('app_settings')
@@ -332,6 +338,7 @@ export async function fetchAppSettings(): Promise<AppSettings> {
 }
 
 export async function fetchCounters(): Promise<Counter[]> {
+  await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     const { data, error } = await supabase
       .from('counters')
@@ -349,6 +356,7 @@ export async function fetchTrips(filters?: {
   date?: string;
   counter_id?: string;
 }): Promise<Trip[]> {
+  await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     let query = supabase
       .from('trips')
@@ -403,6 +411,7 @@ export async function fetchTrips(filters?: {
 }
 
 export async function fetchTripSeats(tripId: string): Promise<Seat[]> {
+  await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     const { data, error } = await supabase
       .from('seats')
@@ -426,6 +435,7 @@ export async function createBooking(payload: {
   boarding_point: string;
   selected_seats: string[];
 }): Promise<Booking> {
+  await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     const { data, error } = await supabase.rpc('submit_booking', {
       p_trip_id: payload.trip_id,
@@ -444,6 +454,7 @@ export async function createBooking(payload: {
 }
 
 export async function fetchMyBookings(): Promise<Booking[]> {
+  await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     const { data: userData } = await supabase.auth.getUser();
     if (!userData.user) return [];
@@ -473,6 +484,7 @@ export async function fetchMyBookings(): Promise<Booking[]> {
 }
 
 export async function lookupBookings(query: string): Promise<Booking[]> {
+  await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     const clean = query.trim();
     const { data, error } = await supabase
@@ -494,6 +506,7 @@ export async function loginWithIdentifier(
   identifier: string,
   password: string
 ): Promise<{ user: Profile }> {
+  await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     const cleanId = identifier.trim();
 
@@ -630,6 +643,7 @@ export async function registerPassenger(payload: {
   password: string;
   email?: string;
 }): Promise<{ user: Profile }> {
+  await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     const cleanPhone = payload.phone.trim();
     const digits = cleanPhone.replace(/[\s-]/g, '');
@@ -679,6 +693,7 @@ export async function registerPassenger(payload: {
 }
 
 export async function fetchCurrentUser(): Promise<Profile | null> {
+  await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     const { data } = await supabase.auth.getUser();
     if (!data.user) return null;
@@ -715,6 +730,7 @@ export async function fetchCurrentUser(): Promise<Profile | null> {
 }
 
 export async function signOutUser(): Promise<void> {
+  await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     await supabase.auth.signOut();
     return;
@@ -727,6 +743,7 @@ export async function signOutUser(): Promise<void> {
 // =============================================================================
 
 export async function fetchOperatorTrips(counterId?: string): Promise<Trip[]> {
+  await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     return fetchTrips(counterId ? { counter_id: counterId } : undefined);
   }
@@ -735,6 +752,7 @@ export async function fetchOperatorTrips(counterId?: string): Promise<Trip[]> {
 }
 
 export async function fetchOperatorBookings(counterId?: string): Promise<Booking[]> {
+  await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     const query = supabase
       .from('bookings')
@@ -755,6 +773,7 @@ export async function updateBookingStatus(
   bookingId: string,
   status: BookingStatus
 ): Promise<{ id: string; status: BookingStatus }> {
+  await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     const { data: booking, error: fetchErr } = await supabase
       .from('bookings')
@@ -803,6 +822,7 @@ export async function updateAppSettings(payload: {
   organization_name: string;
   organization_logo_url: string;
 }): Promise<AppSettings> {
+  await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     const { data, error } = await supabase
       .from('app_settings')
@@ -825,6 +845,7 @@ export async function updateAppSettings(payload: {
 }
 
 export async function fetchAdminOverview(): Promise<AdminOverview> {
+  await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     const [bookingsRes, tripsRes, countersRes] = await Promise.all([
       supabase.from('bookings').select('id, total_fare, status, trips(counter_id)'),
@@ -892,6 +913,7 @@ export async function createCounter(payload: {
   operator_username: string;
   operator_password: string;
 }): Promise<Counter> {
+  await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     const cleanUsername = payload.operator_username.trim();
     if (!cleanUsername || payload.operator_password.length < 4) {
@@ -958,6 +980,7 @@ export async function createCounter(payload: {
 }
 
 export async function deleteCounter(id: string): Promise<void> {
+  await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     await supabase.from('profiles').delete().eq('counter_id', id).eq('role', 'counter_admin');
     const { error } = await supabase.from('counters').delete().eq('id', id);
@@ -976,6 +999,7 @@ export async function createTrip(payload: {
   price: number;
   total_seats: number;
 }): Promise<Trip> {
+  await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     const { data, error } = await supabase.from('trips').insert(payload).select().single();
     if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
@@ -988,6 +1012,7 @@ export async function createTrip(payload: {
 }
 
 export async function deleteTrip(id: string): Promise<void> {
+  await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     const { error } = await supabase.from('trips').delete().eq('id', id);
     if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
@@ -997,6 +1022,7 @@ export async function deleteTrip(id: string): Promise<void> {
 }
 
 export async function fetchAllUsers(): Promise<Profile[]> {
+  await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     const { data, error } = await supabase
       .from('profiles')
@@ -1017,6 +1043,7 @@ export async function createAdminUser(payload: {
   role: UserRole;
   counter_id: string | null;
 }): Promise<Profile> {
+  await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     const cleanUsername = payload.email.trim();
     if (
@@ -1075,6 +1102,7 @@ export async function updateUserRole(
   counter_id: string | null,
   new_password?: string
 ): Promise<Profile> {
+  await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     if (role === 'super_admin') {
       throw new Error('শুধুমাত্র যাত্রী অথবা কাউন্টার অপারেটর রোল নির্ধারণ করা যাবে');
@@ -1099,6 +1127,7 @@ export async function updateUserRole(
 }
 
 export async function deleteAdminUser(id: string): Promise<void> {
+  await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     const { error } = await supabase
       .from('profiles')
