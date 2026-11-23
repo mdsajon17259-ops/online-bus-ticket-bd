@@ -4,7 +4,7 @@ import { useApp, type ActivePanel } from '../context/AppContext';
 import { extractErrorMessage, isMasterSuperAdminProfile } from '../lib/api';
 
 interface AuthScreenProps {
-  requiredRole?: 'counter_admin' | 'super_admin';
+  requiredRole?: 'counter_admin' | 'counter_representative' | 'super_admin';
   redirectTo?: ActivePanel;
   title?: string;
   subtitle?: string;
@@ -13,6 +13,7 @@ interface AuthScreenProps {
 const ROLE_LABELS: Record<string, string> = {
   super_admin: 'মাস্টার সুপার অ্যাডমিন',
   counter_admin: 'কাউন্টার অপারেটর',
+  counter_representative: 'কাউন্টার প্রতিনিধি (শুধুমাত্র দেখার অনুমতি)',
   user: 'সাধারণ যাত্রী',
 };
 
@@ -45,13 +46,20 @@ export function AuthScreen({
         setActivePanel('admin');
       } else if (profile.role === 'counter_admin') {
         setActivePanel('operator');
-      } else if (redirectTo && redirectTo !== 'admin' && redirectTo !== 'operator') {
+      } else if (profile.role === 'counter_representative') {
+        setActivePanel('representative');
+      } else if (
+        redirectTo &&
+        redirectTo !== 'admin' &&
+        redirectTo !== 'operator' &&
+        redirectTo !== 'representative'
+      ) {
         setActivePanel(redirectTo);
       } else {
         setActivePanel('passenger');
       }
     } catch (err) {
-      setError(extractErrorMessage(err, 'লগইন সম্পন্ন করা যায়নি'));
+      setError(extractErrorMessage(err, 'Invalid username or password'));
     } finally {
       setLoading(false);
     }
@@ -63,6 +71,9 @@ export function AuthScreen({
     ((requiredRole === 'super_admin' && !isMasterSuperAdminProfile(user)) ||
       (requiredRole === 'counter_admin' &&
         user.role !== 'counter_admin' &&
+        !isMasterSuperAdminProfile(user)) ||
+      (requiredRole === 'counter_representative' &&
+        user.role !== 'counter_representative' &&
         !isMasterSuperAdminProfile(user)))
   ) {
     return (
@@ -267,9 +278,21 @@ export function AuthScreen({
                 <Bus className="w-4 h-4" />
               </span>
               <div>
-                <p className="text-xs font-semibold text-slate-900">কাউন্টার অপারেটর</p>
+                <p className="text-xs font-semibold text-slate-900">কাউন্টার প্যানেল (পূর্ণ কাউন্টার নিয়ন্ত্রণ)</p>
                 <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
-                  সুপার অ্যাডমিন কর্তৃক নির্ধারিত কাউন্টার ইউজারনেম ও পাসওয়ার্ড দিয়ে সরাসরি নিজস্ব কাউন্টার প্যানেলে প্রবেশ করুন।
+                  কাউন্টার ইউজারনেম ও পাসওয়ার্ড দিয়ে লগইন করলে নিজস্ব কাউন্টারের ট্রিপ, ভাড়া, আসন ও বুকিং সম্পাদনা ও পরিচালনা করা যাবে।
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3 pt-4">
+              <span className="w-8 h-8 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center shrink-0">
+                <User className="w-4 h-4" />
+              </span>
+              <div>
+                <p className="text-xs font-semibold text-slate-900">কাউন্টার প্রতিনিধি প্যানেল (শুধুমাত্র দেখার অনুমতি)</p>
+                <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                  প্রতিনিধি ইউজারনেম দিয়ে লগইন করলে শুধুমাত্র নির্ধারিত কাউন্টারের টিকেট বিক্রি ও বুকিং রিপোর্ট দেখা যাবে (কোনো পরিবর্তন করা যাবে না)।
                 </p>
               </div>
             </div>
@@ -279,9 +302,9 @@ export function AuthScreen({
                 <ShieldCheck className="w-4 h-4" />
               </span>
               <div>
-                <p className="text-xs font-semibold text-slate-900">সিস্টেম অ্যাডমিনিস্ট্রেটর</p>
+                <p className="text-xs font-semibold text-slate-900">অ্যাডমিন প্যানেল</p>
                 <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
-                  নির্ধারিত অ্যাডমিন ক্রেডেনশিয়াল দিয়ে লগইন করলে সরাসরি মাস্টার কন্ট্রোল প্যানেল চালু হবে।
+                  নির্ধারিত অ্যাডমিন ক্রেডেনশিয়াল দিয়ে লগইন করলে সরাসরি পূর্ণ ক্ষমতাসম্পন্ন মাস্টার কন্ট্রোল প্যানেল চালু হবে।
                 </p>
               </div>
             </div>

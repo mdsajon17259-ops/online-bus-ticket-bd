@@ -4,6 +4,8 @@ import {
   Bus,
   Check,
   Database,
+  History,
+  KeyRound,
   LayoutDashboard,
   Plus,
   Settings,
@@ -11,6 +13,7 @@ import {
   Trash2,
   Upload,
   Users,
+  X,
 } from 'lucide-react';
 import {
   createAdminUser,
@@ -21,11 +24,14 @@ import {
   deleteTrip,
   extractErrorMessage,
   fetchAdminBookings,
+  fetchAdminCounters,
   fetchAdminOverview,
   fetchAllUsers,
-  fetchCounters,
+  fetchPasswordResetLogs,
   fetchTrips,
   isMasterSuperAdminProfile,
+  MASTER_ADMIN_USERNAME,
+  resetCounterAccountPassword,
   updateAppSettings,
   updateBookingStatus,
   updateUserRole,
@@ -38,7 +44,15 @@ import {
 } from '../lib/format';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import { useApp } from '../context/AppContext';
-import type { AdminOverview, Booking, Counter, Profile, Trip, UserRole } from '../types';
+import type {
+  AdminOverview,
+  Booking,
+  Counter,
+  PasswordResetLog,
+  Profile,
+  Trip,
+  UserRole,
+} from '../types';
 import { AuthScreen } from './AuthScreen';
 import { StatusBadge } from './StatusBadge';
 
@@ -53,6 +67,7 @@ export function SuperAdminPanel() {
   const [counters, setCounters] = useState<Counter[]>([]);
   const [trips, setTrips] = useState<Trip[]>([]);
   const [users, setUsers] = useState<Profile[]>([]);
+  const [resetLogs, setResetLogs] = useState<PasswordResetLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -62,14 +77,26 @@ export function SuperAdminPanel() {
   const [orgLogoUrl, setOrgLogoUrl] = useState(settings.organization_logo_url);
   const [savingSettings, setSavingSettings] = useState(false);
 
-  // New Counter Form (includes required Counter Operator Username & Password)
+  // New Counter Form (includes Counter + Representative Usernames & Passwords)
   const [cName, setCName] = useState('');
   const [cPhone, setCPhone] = useState('');
   const [cAddress, setCAddress] = useState('');
   const [cLogoUrl, setCLogoUrl] = useState('');
   const [cUsername, setCUsername] = useState('');
   const [cPassword, setCPassword] = useState('');
+  const [cRepUsername, setCRepUsername] = useState('');
+  const [cRepPassword, setCRepPassword] = useState('');
   const [creatingCounter, setCreatingCounter] = useState(false);
+
+  // Admin Recovery: Password Reset Modal State
+  const [resetModal, setResetModal] = useState<{
+    counterId: string;
+    counterName: string;
+    targetRole: 'counter_admin' | 'counter_representative';
+    targetUsername: string;
+  } | null>(null);
+  const [resetNewPassword, setResetNewPassword] = useState('');
+  const [resettingPassword, setResettingPassword] = useState(false);
 
   // New Trip Form
   const [tCounterId, setTCounterId] = useState('');
@@ -81,7 +108,7 @@ export function SuperAdminPanel() {
   const [tSeats, setTSeats] = useState('36');
   const [creatingTrip, setCreatingTrip] = useState(false);
 
-  // New User / Counter Operator Form
+  // New User / Counter Operator / Representative Form
   const [uUsername, setUUsername] = useState('');
   const [uName, setUName] = useState('');
   const [uPhone, setUPhone] = useState('');
@@ -102,18 +129,20 @@ export function SuperAdminPanel() {
     setLoading(true);
     setError('');
     try {
-      const [ov, bList, cList, tList, uList] = await Promise.all([
+      const [ov, bList, cList, tList, uList, logsList] = await Promise.all([
         fetchAdminOverview(),
         fetchAdminBookings(),
-        fetchCounters(),
+        fetchAdminCounters(),
         fetchTrips(),
         fetchAllUsers(),
+        fetchPasswordResetLogs(),
       ]);
       setOverview(ov);
       setAllBookings(bList);
       setCounters(cList);
       setTrips(tList);
       setUsers(uList);
+      setResetLogs(logsList);
       if (cList.length > 0) {
         setTCounterId((prev) => prev || cList[0].id);
         setUCounterId((prev) => prev || cList[0].id);
@@ -131,7 +160,7 @@ export function SuperAdminPanel() {
 
   const showNotice = (msg: string) => {
     setNotice(msg);
-    setTimeout(() => setNotice(''), 4000);
+    setTimeout(() => setNotice(''), 5000);
   };
 
   const handleLogoFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -183,16 +212,43 @@ export function SuperAdminPanel() {
 
   const handleCreateCounter = async (e: React.FormEvent) => {
     e.preventDefault();
-    setCreatingCounter(true);
     setError('');
+
+    const opUser = cUsername.trim();
+    const repUser = cRepUsername.trim();
+
+    if (cPassword.length < 6 || cRepPassword.length < 6) {
+      setError('কাউন্টার ও প্রতিনিধি উভয়ের পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে।');
+      return;
+    }
+    if (opUser.toLowerCase() === repUser.toLowerCase()) {
+      setError('কাউন্টার ইউজারনেম এবং প্রতিনিধি ইউজারনেম এক হতে পারবে না।');
+      return;
+    }
+    const existingSet = new Set([
+      MASTER_ADMIN_USERNAME.toLowerCase(),
+      ...users.map((u) => u.email.trim().toLowerCase()),
+    ]);
+    if (existingSet.has(opUser.toLowerCase())) {
+      setError(`কাউন্টার ইউজারনেম "${opUser}" ইতিমধ্যে সিস্টেমে বিদ্যমান। অনুগ্রহ করে ভিন্ন ইউজারনেম দিন।`);
+      return;
+    }
+    if (existingSet.has(repUser.toLowerCase())) {
+      setError(`প্রতিনিধি ইউজারনেম "${repUser}" ইতিমধ্যে সিস্টেমে বিদ্যমান। অনুগ্রহ করে ভিন্ন ইউজারনেম দিন।`);
+      return;
+    }
+
+    setCreatingCounter(true);
     try {
       await createCounter({
         counter_name: cName,
         phone: cPhone,
         address: cAddress,
         logo_url: cLogoUrl,
-        operator_username: cUsername,
+        operator_username: opUser,
         operator_password: cPassword,
+        representative_username: repUser,
+        representative_password: cRepPassword,
       });
       setCName('');
       setCPhone('');
@@ -200,12 +256,44 @@ export function SuperAdminPanel() {
       setCLogoUrl('');
       setCUsername('');
       setCPassword('');
+      setCRepUsername('');
+      setCRepPassword('');
       await loadAdminData();
-      showNotice('নতুন বাস কাউন্টার ও অপারেটর অ্যাকাউন্ট সফলভাবে তৈরি হয়েছে।');
+      showNotice('নতুন বাস কাউন্টার, কাউন্টার অ্যাকাউন্ট এবং প্রতিনিধি অ্যাকাউন্ট সফলভাবে তৈরি হয়েছে।');
     } catch (err) {
       setError(extractErrorMessage(err, 'কাউন্টার তৈরি করা যায়নি'));
     } finally {
       setCreatingCounter(false);
+    }
+  };
+
+  const handleResetPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetModal) return;
+    if (resetNewPassword.length < 6) {
+      setError('নতুন পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে।');
+      return;
+    }
+    setResettingPassword(true);
+    setError('');
+    try {
+      await resetCounterAccountPassword({
+        counter_id: resetModal.counterId,
+        target_role: resetModal.targetRole,
+        new_password: resetNewPassword,
+      });
+      const roleLabel =
+        resetModal.targetRole === 'counter_admin' ? 'কাউন্টার' : 'কাউন্টার প্রতিনিধি';
+      setResetModal(null);
+      setResetNewPassword('');
+      await loadAdminData();
+      showNotice(
+        `${roleLabel} (${resetModal.targetUsername}) অ্যাকাউন্টের পাসওয়ার্ড রিসেট হয়েছে এবং পূর্বের সকল সেশন বাতিল করা হয়েছে।`
+      );
+    } catch (err) {
+      setError(extractErrorMessage(err, 'পাসওয়ার্ড রিসেট করা যায়নি'));
+    } finally {
+      setResettingPassword(false);
     }
   };
 
@@ -236,23 +324,28 @@ export function SuperAdminPanel() {
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    setCreatingUser(true);
     setError('');
+    if (uPassword.length < 6) {
+      setError('পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে।');
+      return;
+    }
+    setCreatingUser(true);
     try {
+      const isCounterRole = uRole === 'counter_admin' || uRole === 'counter_representative';
       await createAdminUser({
         email: uUsername,
         full_name: uName,
         phone: uPhone,
         password: uPassword,
         role: uRole,
-        counter_id: uRole === 'counter_admin' ? uCounterId : null,
+        counter_id: isCounterRole ? uCounterId : null,
       });
       setUUsername('');
       setUName('');
       setUPhone('');
       setUPassword('');
       await loadAdminData();
-      showNotice('নতুন কাউন্টার অপারেটর/ব্যবহারকারী অ্যাকাউন্ট তৈরি হয়েছে।');
+      showNotice('নতুন অ্যাকাউন্ট সফলভাবে তৈরি হয়েছে।');
     } catch (err) {
       setError(extractErrorMessage(err, 'ব্যবহারকারী তৈরি করা যায়নি'));
     } finally {
@@ -687,35 +780,83 @@ export function SuperAdminPanel() {
                       placeholder="লোগো URL (ঐচ্ছিক)"
                       className="w-full min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
                     />
-                    <div className="pt-2 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label htmlFor="c-username" className="block text-[11px] font-medium text-slate-600 mb-1">
-                          কাউন্টার ইউজারনেম *
-                        </label>
-                        <input
-                          id="c-username"
-                          type="text"
-                          required
-                          value={cUsername}
-                          onChange={(e) => setCUsername(e.target.value)}
-                          placeholder="যেমন: ena_counter"
-                          className="w-full min-h-[42px] px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
-                        />
+                    <div className="pt-3 border-t border-slate-100 space-y-3">
+                      <p className="text-xs font-semibold text-slate-800">
+                        কাউন্টার লগইন অ্যাকাউন্ট (পূর্ণ কাউন্টার নিয়ন্ত্রণ)
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label htmlFor="c-username" className="block text-[11px] font-medium text-slate-600 mb-1">
+                            কাউন্টার ইউজারনেম *
+                          </label>
+                          <input
+                            id="c-username"
+                            type="text"
+                            required
+                            autoCapitalize="none"
+                            autoCorrect="off"
+                            spellCheck={false}
+                            value={cUsername}
+                            onChange={(e) => setCUsername(e.target.value)}
+                            placeholder="যেমন: ena_counter"
+                            className="w-full min-h-[42px] px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
+                          />
+                        </div>
+                        <div>
+                          <label htmlFor="c-password" className="block text-[11px] font-medium text-slate-600 mb-1">
+                            কাউন্টার পাসওয়ার্ড *
+                          </label>
+                          <input
+                            id="c-password"
+                            type="password"
+                            required
+                            minLength={6}
+                            value={cPassword}
+                            onChange={(e) => setCPassword(e.target.value)}
+                            placeholder="কমপক্ষে ৬ অক্ষর"
+                            className="w-full min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
+                          />
+                        </div>
                       </div>
-                      <div>
-                        <label htmlFor="c-password" className="block text-[11px] font-medium text-slate-600 mb-1">
-                          কাউন্টার পাসওয়ার্ড *
-                        </label>
-                        <input
-                          id="c-password"
-                          type="password"
-                          required
-                          minLength={4}
-                          value={cPassword}
-                          onChange={(e) => setCPassword(e.target.value)}
-                          placeholder="কমপক্ষে ৪ অক্ষর"
-                          className="w-full min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
-                        />
+                    </div>
+
+                    <div className="pt-3 border-t border-slate-100 space-y-3">
+                      <p className="text-xs font-semibold text-slate-800">
+                        কাউন্টার প্রতিনিধি অ্যাকাউন্ট (শুধুমাত্র দেখার অনুমতি / Read-Only)
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label htmlFor="c-rep-username" className="block text-[11px] font-medium text-slate-600 mb-1">
+                            কাউন্টার প্রতিনিধি ইউজারনেম *
+                          </label>
+                          <input
+                            id="c-rep-username"
+                            type="text"
+                            required
+                            autoCapitalize="none"
+                            autoCorrect="off"
+                            spellCheck={false}
+                            value={cRepUsername}
+                            onChange={(e) => setCRepUsername(e.target.value)}
+                            placeholder="যেমন: ena_rep"
+                            className="w-full min-h-[42px] px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
+                          />
+                        </div>
+                        <div>
+                          <label htmlFor="c-rep-password" className="block text-[11px] font-medium text-slate-600 mb-1">
+                            কাউন্টার প্রতিনিধি পাসওয়ার্ড *
+                          </label>
+                          <input
+                            id="c-rep-password"
+                            type="password"
+                            required
+                            minLength={6}
+                            value={cRepPassword}
+                            onChange={(e) => setCRepPassword(e.target.value)}
+                            placeholder="কমপক্ষে ৬ অক্ষর"
+                            className="w-full min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
+                          />
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -830,34 +971,87 @@ export function SuperAdminPanel() {
               <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
                 <div className="px-5 py-4 border-b border-slate-200">
                   <h2 className="font-display text-base font-bold text-slate-900">
-                    নিবন্ধিত বাস কাউন্টার ({formatBanglaNumber(counters.length)})
+                    নিবন্ধিত বাস কাউন্টার ও অ্যাডমিন রিকভারি ({formatBanglaNumber(counters.length)})
                   </h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    প্রতিটি কাউন্টারের ইউজারনেম, প্রতিনিধি ইউজারনেম দেখুন এবং প্রয়োজনে পাসওয়ার্ড রিসেট করুন।
+                  </p>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-500">
-                        <th className="py-3 px-5">কাউন্টারের নাম</th>
-                        <th className="py-3 px-5">অপারেটর ইউজারনেম</th>
-                        <th className="py-3 px-5">মোবাইল</th>
-                        <th className="py-3 px-5">ঠিকানা</th>
-                        <th className="py-3 px-5 text-right">মুছুন</th>
+                        <th className="py-3 px-4">কাউন্টার ও ঠিকানা</th>
+                        <th className="py-3 px-4">কাউন্টার ইউজারনেম</th>
+                        <th className="py-3 px-4">প্রতিনিধি ইউজারনেম</th>
+                        <th className="py-3 px-4">পাসওয়ার্ড রিকভারি</th>
+                        <th className="py-3 px-4 text-right">মুছুন</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-sm">
                       {counters.map((c) => {
-                        const ops = users.filter(
-                          (u) => u.role === 'counter_admin' && u.counter_id === c.id
-                        );
+                        const opUser =
+                          c.operator_username ||
+                          users.find((u) => u.role === 'counter_admin' && u.counter_id === c.id)?.email ||
+                          '';
+                        const repUser =
+                          c.representative_username ||
+                          users.find((u) => u.role === 'counter_representative' && u.counter_id === c.id)?.email ||
+                          '';
                         return (
                           <tr key={c.id} className="hover:bg-slate-50/70">
-                            <td className="py-3 px-5 font-medium text-slate-900">{c.counter_name}</td>
-                            <td className="py-3 px-5 font-mono text-xs text-blue-700">
-                              {ops.length > 0 ? ops.map((op) => op.email).join(', ') : 'নির্ধারিত নয়'}
+                            <td className="py-3 px-4">
+                              <div className="font-medium text-slate-900">{c.counter_name}</div>
+                              <div className="text-xs font-mono text-slate-500 tabular-nums">{c.phone}</div>
+                              <div className="text-[11px] text-slate-500">{c.address}</div>
                             </td>
-                            <td className="py-3 px-5 font-mono text-xs text-slate-600 tabular-nums">{c.phone}</td>
-                            <td className="py-3 px-5 text-xs text-slate-600">{c.address}</td>
-                            <td className="py-3 px-5 text-right">
+                            <td className="py-3 px-4 font-mono text-xs text-blue-700">
+                              {opUser || <span className="text-slate-400">নির্ধারিত নয়</span>}
+                            </td>
+                            <td className="py-3 px-4 font-mono text-xs text-amber-800">
+                              {repUser || <span className="text-slate-400">নির্ধারিত নয়</span>}
+                            </td>
+                            <td className="py-3 px-4">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  disabled={!opUser}
+                                  onClick={() => {
+                                    setResetModal({
+                                      counterId: c.id,
+                                      counterName: c.counter_name,
+                                      targetRole: 'counter_admin',
+                                      targetUsername: opUser,
+                                    });
+                                    setResetNewPassword('');
+                                    setError('');
+                                  }}
+                                  className="min-h-[34px] px-2.5 py-1 text-[11px] font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 disabled:opacity-40 rounded-md inline-flex items-center gap-1 whitespace-nowrap"
+                                >
+                                  <KeyRound className="w-3 h-3" aria-hidden="true" />
+                                  <span>Reset Counter Password</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={!repUser}
+                                  onClick={() => {
+                                    setResetModal({
+                                      counterId: c.id,
+                                      counterName: c.counter_name,
+                                      targetRole: 'counter_representative',
+                                      targetUsername: repUser,
+                                    });
+                                    setResetNewPassword('');
+                                    setError('');
+                                  }}
+                                  className="min-h-[34px] px-2.5 py-1 text-[11px] font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 disabled:opacity-40 rounded-md inline-flex items-center gap-1 whitespace-nowrap"
+                                >
+                                  <KeyRound className="w-3 h-3" aria-hidden="true" />
+                                  <span>Reset Representative Password</span>
+                                </button>
+                              </div>
+                            </td>
+                            <td className="py-3 px-4 text-right">
                               <button
                                 type="button"
                                 onClick={async () => {
@@ -876,6 +1070,60 @@ export function SuperAdminPanel() {
                     </tbody>
                   </table>
                 </div>
+              </div>
+
+              {/* Password Reset Audit Log */}
+              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+                <div className="px-5 py-4 border-b border-slate-200 flex items-center gap-2">
+                  <History className="w-4 h-4 text-slate-600" aria-hidden="true" />
+                  <div>
+                    <h2 className="font-display text-base font-bold text-slate-900">
+                      পাসওয়ার্ড রিসেট অডিট লগ ({formatBanglaNumber(resetLogs.length)})
+                    </h2>
+                    <p className="text-xs text-slate-500">
+                      প্রতিটি পাসওয়ার্ড রিসেটের পর পূর্বের সকল সেশন স্বয়ংক্রিয়ভাবে বাতিল হয় এবং এখানে লগ সংরক্ষিত থাকে।
+                    </p>
+                  </div>
+                </div>
+                {resetLogs.length === 0 ? (
+                  <div className="p-6 text-xs text-slate-500 text-center">
+                    এখনো কোনো পাসওয়ার্ড রিসেট করা হয়নি।
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-500">
+                          <th className="py-3 px-4">কাউন্টারের নাম</th>
+                          <th className="py-3 px-4">অ্যাকাউন্টের ধরন</th>
+                          <th className="py-3 px-4">ইউজারনেম</th>
+                          <th className="py-3 px-4">রিসেট করেছেন</th>
+                          <th className="py-3 px-4">তারিখ ও সময়</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-xs">
+                        {resetLogs.map((log) => {
+                          const dt = formatBanglaDateTime(log.created_at);
+                          return (
+                            <tr key={log.id} className="hover:bg-slate-50/70">
+                              <td className="py-2.5 px-4 font-medium text-slate-900">{log.counter_name}</td>
+                              <td className="py-2.5 px-4">
+                                {log.target_role === 'counter_admin'
+                                  ? 'কাউন্টার (Counter)'
+                                  : 'প্রতিনিধি (Representative)'}
+                              </td>
+                              <td className="py-2.5 px-4 font-mono text-slate-700">{log.target_username}</td>
+                              <td className="py-2.5 px-4 font-mono text-slate-600">{log.reset_by}</td>
+                              <td className="py-2.5 px-4 font-mono text-slate-500 tabular-nums">
+                                {dt.date} · {dt.time}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
 
               <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
@@ -986,10 +1234,10 @@ export function SuperAdminPanel() {
                   <input
                     type="password"
                     required
-                    minLength={4}
+                    minLength={6}
                     value={uPassword}
                     onChange={(e) => setUPassword(e.target.value)}
-                    placeholder="পাসওয়ার্ড (কমপক্ষে ৪ অক্ষর)"
+                    placeholder="পাসওয়ার্ড (কমপক্ষে ৬ অক্ষর)"
                     className="min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
                   />
                   <select
@@ -999,10 +1247,11 @@ export function SuperAdminPanel() {
                     className="min-h-[42px] px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
                   >
                     <option value="counter_admin">কাউন্টার অপারেটর</option>
+                    <option value="counter_representative">কাউন্টার প্রতিনিধি (Read-Only)</option>
                     <option value="user">সাধারণ যাত্রী</option>
                   </select>
 
-                  {uRole === 'counter_admin' && (
+                  {(uRole === 'counter_admin' || uRole === 'counter_representative') && (
                     <select
                       aria-label="কাউন্টার নির্ধারণ করুন"
                       value={uCounterId}
@@ -1040,66 +1289,73 @@ export function SuperAdminPanel() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-sm">
-                      {users.map((u) => (
-                        <tr key={u.id} className="hover:bg-slate-50/70">
-                          <td className="py-3 px-5">
-                            <div className="font-medium text-slate-900">{u.full_name || u.email}</div>
-                            <div className="text-xs font-mono text-slate-500">
-                              ইউজারনেম: {u.email}
-                              {u.phone ? ` · ${u.phone}` : ''}
-                            </div>
-                          </td>
-                          <td className="py-3 px-5">
-                            <select
-                              aria-label={`${u.email} এর রোল`}
-                              value={u.role}
-                              onChange={(e) => {
-                                const nextRole = e.target.value as UserRole;
-                                const nextCounter =
-                                  nextRole === 'counter_admin'
+                      {users.map((u) => {
+                        const isCounterRole =
+                          u.role === 'counter_admin' || u.role === 'counter_representative';
+                        return (
+                          <tr key={u.id} className="hover:bg-slate-50/70">
+                            <td className="py-3 px-5">
+                              <div className="font-medium text-slate-900">{u.full_name || u.email}</div>
+                              <div className="text-xs font-mono text-slate-500">
+                                ইউজারনেম: {u.email}
+                                {u.phone ? ` · ${u.phone}` : ''}
+                              </div>
+                            </td>
+                            <td className="py-3 px-5">
+                              <select
+                                aria-label={`${u.email} এর রোল`}
+                                value={u.role}
+                                onChange={(e) => {
+                                  const nextRole = e.target.value as UserRole;
+                                  const nextIsCounter =
+                                    nextRole === 'counter_admin' ||
+                                    nextRole === 'counter_representative';
+                                  const nextCounter = nextIsCounter
                                     ? u.counter_id || counters[0]?.id || null
                                     : null;
-                                handleRoleUpdate(u.id, nextRole, nextCounter);
-                              }}
-                              className="min-h-[36px] px-2.5 py-1 text-xs font-medium bg-white border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-700"
-                            >
-                              <option value="user">যাত্রী (user)</option>
-                              <option value="counter_admin">কাউন্টার অপারেটর (counter_admin)</option>
-                            </select>
-                          </td>
-                          <td className="py-3 px-5">
-                            {u.role === 'counter_admin' ? (
-                              <select
-                                aria-label={`${u.email} এর কাউন্টার`}
-                                value={u.counter_id || ''}
-                                onChange={(e) => handleRoleUpdate(u.id, 'counter_admin', e.target.value)}
+                                  handleRoleUpdate(u.id, nextRole, nextCounter);
+                                }}
                                 className="min-h-[36px] px-2.5 py-1 text-xs font-medium bg-white border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-700"
                               >
-                                {counters.map((c) => (
-                                  <option key={c.id} value={c.id}>
-                                    {c.counter_name}
-                                  </option>
-                                ))}
+                                <option value="user">যাত্রী (user)</option>
+                                <option value="counter_admin">কাউন্টার অপারেটর (counter_admin)</option>
+                                <option value="counter_representative">কাউন্টার প্রতিনিধি (counter_representative)</option>
                               </select>
-                            ) : (
-                              <span className="text-xs text-slate-400">প্রযোজ্য নয়</span>
-                            )}
-                          </td>
-                          <td className="py-3 px-5 text-right">
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                await deleteAdminUser(u.id);
-                                await loadAdminData();
-                              }}
-                              aria-label={`${u.email} মুছুন`}
-                              className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
+                            </td>
+                            <td className="py-3 px-5">
+                              {isCounterRole ? (
+                                <select
+                                  aria-label={`${u.email} এর কাউন্টার`}
+                                  value={u.counter_id || ''}
+                                  onChange={(e) => handleRoleUpdate(u.id, u.role, e.target.value)}
+                                  className="min-h-[36px] px-2.5 py-1 text-xs font-medium bg-white border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-700"
+                                >
+                                  {counters.map((c) => (
+                                    <option key={c.id} value={c.id}>
+                                      {c.counter_name}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <span className="text-xs text-slate-400">প্রযোজ্য নয়</span>
+                              )}
+                            </td>
+                            <td className="py-3 px-5 text-right">
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  await deleteAdminUser(u.id);
+                                  await loadAdminData();
+                                }}
+                                aria-label={`${u.email} মুছুন`}
+                                className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1108,6 +1364,79 @@ export function SuperAdminPanel() {
           )}
         </main>
       </div>
+
+      {/* Admin Recovery: Reset Counter / Representative Password Modal */}
+      {resetModal && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <form
+            onSubmit={handleResetPasswordSubmit}
+            className="bg-white rounded-2xl border border-slate-200 w-full max-w-md p-6 space-y-4"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="font-display text-lg font-bold text-slate-900">
+                  {resetModal.targetRole === 'counter_admin'
+                    ? 'Reset Counter Password'
+                    : 'Reset Representative Password'}
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  কাউন্টার: <strong className="text-slate-800">{resetModal.counterName}</strong> · ইউজারনেম:{' '}
+                  <strong className="font-mono text-blue-700">{resetModal.targetUsername}</strong>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setResetModal(null)}
+                aria-label="বন্ধ করুন"
+                className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div>
+              <label htmlFor="reset-new-password" className="block text-xs font-medium text-slate-700 mb-1.5">
+                নতুন পাসওয়ার্ড (কমপক্ষে ৬ অক্ষর)
+              </label>
+              <input
+                id="reset-new-password"
+                type="password"
+                required
+                minLength={6}
+                autoFocus
+                value={resetNewPassword}
+                onChange={(e) => setResetNewPassword(e.target.value)}
+                placeholder="কমপক্ষে ৬ অক্ষরের নতুন পাসওয়ার্ড দিন"
+                className="w-full min-h-[44px] px-3.5 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
+              />
+              <p className="text-[11px] text-amber-700 mt-1.5">
+                পাসওয়ার্ড রিসেট করার সাথে সাথে এই অ্যাকাউন্টের পূর্বে লগইন করা সকল সেশন বাতিল হয়ে যাবে এবং অডিট লগে সংরক্ষিত হবে।
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setResetModal(null)}
+                className="min-h-[42px] px-4 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg"
+              >
+                বাতিল
+              </button>
+              <button
+                type="submit"
+                disabled={resettingPassword}
+                className="min-h-[42px] px-5 py-2 text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 disabled:opacity-60 rounded-lg"
+              >
+                {resettingPassword ? 'রিসেট হচ্ছে...' : 'পাসওয়ার্ড রিসেট নিশ্চিত করুন'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

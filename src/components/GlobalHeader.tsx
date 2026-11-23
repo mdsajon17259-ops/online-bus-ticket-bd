@@ -23,7 +23,9 @@ export function GlobalHeader() {
       ? 'admin'
       : user?.role === 'counter_admin'
         ? 'operator'
-        : null;
+        : user?.role === 'counter_representative'
+          ? 'representative'
+          : null;
 
   const showDashboardShortcut = Boolean(dashboardTarget && activePanel !== dashboardTarget);
 

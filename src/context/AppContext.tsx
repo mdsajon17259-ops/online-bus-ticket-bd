@@ -9,7 +9,7 @@ import {
 } from '../lib/api';
 import type { AppSettings, Profile } from '../types';
 
-export type ActivePanel = 'passenger' | 'bookings' | 'operator' | 'admin' | 'auth';
+export type ActivePanel = 'passenger' | 'bookings' | 'operator' | 'representative' | 'admin' | 'auth';
 
 interface AppContextValue {
   settings: AppSettings;
@@ -69,6 +69,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           setActivePanel('admin');
         } else if (profile?.role === 'counter_admin') {
           setActivePanel('operator');
+        } else if (profile?.role === 'counter_representative') {
+          setActivePanel('representative');
         }
       })
       .catch(() => setUser(null))

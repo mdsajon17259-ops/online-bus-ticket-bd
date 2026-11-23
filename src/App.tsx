@@ -3,6 +3,7 @@ import { AppProvider, useApp } from './context/AppContext';
 import { GlobalHeader } from './components/GlobalHeader';
 import { PassengerPortal } from './components/PassengerPortal';
 import { CounterOperatorPanel } from './components/CounterOperatorPanel';
+import { RepresentativePanel } from './components/RepresentativePanel';
 import { SuperAdminPanel } from './components/SuperAdminPanel';
 import { AuthScreen } from './components/AuthScreen';
 import { formatBanglaNumber } from './lib/format';
@@ -18,6 +19,7 @@ function AppShell() {
         {activePanel === 'passenger' && <PassengerPortal mode="book" />}
         {activePanel === 'bookings' && <PassengerPortal mode="lookup" />}
         {activePanel === 'operator' && <CounterOperatorPanel />}
+        {activePanel === 'representative' && <RepresentativePanel />}
         {activePanel === 'admin' && <SuperAdminPanel />}
         {activePanel === 'auth' && <AuthScreen />}
       </div>

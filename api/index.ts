@@ -125,6 +125,12 @@ function toOperatorAuthEmail(usernameOrEmail: string): string {
   return `${clean.toLowerCase()}@operator.deshtravels.bd`;
 }
 
+function toRepresentativeAuthEmail(usernameOrEmail: string): string {
+  const clean = usernameOrEmail.trim();
+  if (clean.includes('@')) return clean.toLowerCase();
+  return `${clean.toLowerCase()}@rep.deshtravels.bd`;
+}
+
 function toPassengerAuthEmail(phoneOrEmail: string): string {
   const clean = phoneOrEmail.trim();
   if (clean.includes('@')) return clean.toLowerCase();
@@ -152,6 +158,7 @@ function mapSupabaseProfile(row: Record<string, unknown>) {
     role,
     counter_id: row.counter_id ? String(row.counter_id) : null,
     counter_name: (row.counters as { counter_name?: string } | null)?.counter_name || null,
+    token_version: typeof row.token_version === 'number' ? row.token_version : 1,
     created_at: row.created_at ? String(row.created_at) : undefined,
   };
 }
@@ -262,7 +269,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         cleanId.toLowerCase() === MASTER_ADMIN_SUPABASE_EMAIL
       ) {
         if (cleanId !== MASTER_ADMIN_USERNAME || password !== MASTER_ADMIN_PASSWORD) {
-          sendJson(res, 401, { error: 'ভুল ইউজারনেম বা পাসওয়ার্ড' });
+          sendJson(res, 401, { error: 'Invalid username or password' });
           return;
         }
 
@@ -329,7 +336,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         return;
       }
 
-      // Counter operator or Passenger login
+      // Counter operator, Representative, or Passenger login
       let authUserId = '';
       let sessionToken = '';
 
@@ -343,27 +350,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
           sessionToken = data.session.access_token;
         }
       } else {
-        const opAttempt = await supabase.auth.signInWithPassword({
-          email: toOperatorAuthEmail(cleanId),
-          password,
-        });
-        if (!opAttempt.error && opAttempt.data.user && opAttempt.data.session) {
-          authUserId = opAttempt.data.user.id;
-          sessionToken = opAttempt.data.session.access_token;
-        } else {
-          const paxAttempt = await supabase.auth.signInWithPassword({
-            email: toPassengerAuthEmail(cleanId),
+        const candidateEmails = [
+          toOperatorAuthEmail(cleanId),
+          toRepresentativeAuthEmail(cleanId),
+          toPassengerAuthEmail(cleanId),
+        ];
+        for (const candidateEmail of candidateEmails) {
+          const attempt = await supabase.auth.signInWithPassword({
+            email: candidateEmail,
             password,
           });
-          if (!paxAttempt.error && paxAttempt.data.user && paxAttempt.data.session) {
-            authUserId = paxAttempt.data.user.id;
-            sessionToken = paxAttempt.data.session.access_token;
+          if (!attempt.error && attempt.data.user && attempt.data.session) {
+            authUserId = attempt.data.user.id;
+            sessionToken = attempt.data.session.access_token;
+            break;
           }
         }
       }
 
       if (!authUserId || !sessionToken) {
-        sendJson(res, 401, { error: 'ভুল ইউজারনেম বা পাসওয়ার্ড' });
+        sendJson(res, 401, { error: 'Invalid username or password' });
         return;
       }
 
@@ -379,12 +385,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         .single();
 
       if (profErr || !profile) {
-        sendJson(res, 404, { error: 'ব্যবহারকারীর প্রোফাইল পাওয়া যায়নি' });
+        sendJson(res, 401, { error: 'Invalid username or password' });
         return;
       }
 
       if (profile.role === 'super_admin') {
-        sendJson(res, 401, { error: 'ভুল ইউজারনেম বা পাসওয়ার্ড' });
+        sendJson(res, 401, { error: 'Invalid username or password' });
         return;
       }
 

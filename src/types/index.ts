@@ -1,4 +1,8 @@
-export type UserRole = 'user' | 'counter_admin' | 'super_admin';
+export type UserRole =
+  | 'user'
+  | 'counter_admin'
+  | 'counter_representative'
+  | 'super_admin';
 
 export type BookingStatus = 'pending' | 'confirmed' | 'cancelled';
 
@@ -19,6 +23,7 @@ export interface Profile {
   role: UserRole;
   counter_id: string | null;
   counter_name?: string | null;
+  token_version?: number;
   created_at?: string;
 }
 
@@ -28,7 +33,21 @@ export interface Counter {
   phone: string;
   address: string;
   logo_url: string;
+  operator_username?: string | null;
+  operator_user_id?: string | null;
+  representative_username?: string | null;
+  representative_user_id?: string | null;
   created_at?: string;
+}
+
+export interface PasswordResetLog {
+  id: string;
+  counter_id: string | null;
+  counter_name: string;
+  target_role: 'counter_admin' | 'counter_representative';
+  target_username: string;
+  reset_by: string;
+  created_at: string;
 }
 
 export interface Trip {

@@ -8,6 +8,7 @@ interface SeatMapProps {
   selectedSeats: string[];
   onToggleSeat?: (seatNumber: string) => void;
   readOnly?: boolean;
+  allowBookedClick?: boolean;
 }
 
 export function SeatMap({
@@ -15,6 +16,7 @@ export function SeatMap({
   selectedSeats,
   onToggleSeat,
   readOnly = false,
+  allowBookedClick = false,
 }: SeatMapProps) {
   const seatLookup = new Map<string, Seat>();
   seats.forEach((s) => seatLookup.set(s.seat_number, s));
@@ -34,10 +36,14 @@ export function SeatMap({
 
     const isBooked = seat.status === 'booked';
     const isSelected = selectedSeats.includes(seatNumber);
+    const isDisabled = readOnly || (isBooked && !allowBookedClick);
 
     let stateClasses =
       'bg-white border-slate-300 text-slate-800 hover:border-blue-700 hover:bg-blue-50 cursor-pointer';
-    if (isBooked) {
+    if (isBooked && allowBookedClick) {
+      stateClasses =
+        'bg-rose-50 border-rose-300 text-rose-800 hover:bg-rose-100 cursor-pointer';
+    } else if (isBooked) {
       stateClasses =
         'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed';
     } else if (isSelected) {
@@ -51,8 +57,8 @@ export function SeatMap({
       <button
         key={seatNumber}
         type="button"
-        disabled={isBooked || readOnly}
-        onClick={() => !isBooked && !readOnly && onToggleSeat?.(seatNumber)}
+        disabled={isDisabled}
+        onClick={() => !isDisabled && onToggleSeat?.(seatNumber)}
         aria-label={`আসন ${seatNumber} - ${isBooked ? 'বুক করা হয়েছে' : isSelected ? 'নির্বাচিত' : 'খালি আছে'}`}
         aria-pressed={isSelected}
         className={`relative min-w-[44px] min-h-[44px] rounded-lg border text-xs font-mono font-medium tabular-nums flex flex-col items-center justify-center transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-1 ${stateClasses}`}

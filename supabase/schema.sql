@@ -31,13 +31,40 @@ create table if not exists public.profiles (
   email text not null unique,
   full_name text not null default '',
   phone text not null default '',
-  role text not null default 'user' check (role in ('user', 'counter_admin', 'super_admin')),
+  role text not null default 'user' check (role in ('user', 'counter_admin', 'counter_representative', 'super_admin')),
   counter_id uuid references public.counters(id) on delete set null,
+  token_version integer not null default 1,
   created_at timestamptz not null default now()
 );
 
 alter table public.profiles add column if not exists full_name text not null default '';
 alter table public.profiles add column if not exists phone text not null default '';
+alter table public.profiles add column if not exists token_version integer not null default 1;
+
+-- Safely upgrade existing role check constraint to include counter_representative
+do $$
+declare
+  v_constraint_name text;
+begin
+  select c.conname into v_constraint_name
+  from pg_constraint c
+  join pg_class t on t.oid = c.conrelid
+  join pg_namespace n on n.oid = t.relnamespace
+  where n.nspname = 'public'
+    and t.relname = 'profiles'
+    and c.contype = 'c'
+    and pg_get_constraintdef(c.oid) like '%role%';
+
+  if v_constraint_name is not null then
+    execute format('alter table public.profiles drop constraint %I', v_constraint_name);
+  end if;
+
+  alter table public.profiles
+    add constraint profiles_role_check
+    check (role in ('user', 'counter_admin', 'counter_representative', 'super_admin'));
+exception
+  when duplicate_object then null;
+end $$;
 
 -- 4. TRIPS TABLE (Schedules & Routes per Counter)
 create table if not exists public.trips (
@@ -76,6 +103,17 @@ create table if not exists public.bookings (
 );
 
 alter table public.bookings add column if not exists user_id uuid references auth.users(id) on delete set null;
+
+-- 7. PASSWORD RESET AUDIT LOGS TABLE
+create table if not exists public.password_reset_logs (
+  id uuid primary key default gen_random_uuid(),
+  counter_id uuid references public.counters(id) on delete set null,
+  counter_name text not null,
+  target_role text not null check (target_role in ('counter_admin', 'counter_representative')),
+  target_username text not null,
+  reset_by text not null,
+  created_at timestamptz not null default now()
+);
 
 -- =============================================================================
 -- HELPER FUNCTIONS & TRIGGERS
@@ -142,7 +180,7 @@ begin
   v_phone := coalesce(new.raw_user_meta_data->>'phone', '');
 
   -- Only auto-create standard 'user' profiles from public signup metadata;
-  -- counter_admin profiles are explicitly created/assigned by Master Super Admin.
+  -- counter_admin and counter_representative profiles are explicitly created by Master Super Admin.
   if coalesce(new.raw_user_meta_data->>'role', 'user') = 'user' then
     insert into public.profiles (id, email, full_name, phone, role, counter_id)
     values (new.id, v_username, v_full_name, v_phone, 'user', null)
@@ -211,18 +249,7 @@ begin
 end;
 $$;
 
--- =============================================================================
--- ROW LEVEL SECURITY (RLS) POLICIES
--- =============================================================================
-
-alter table public.app_settings enable row level security;
-alter table public.counters enable row level security;
-alter table public.profiles enable row level security;
-alter table public.trips enable row level security;
-alter table public.seats enable row level security;
-alter table public.bookings enable row level security;
-
--- Helper to check current user's role
+-- Helper to check current user's role & counter_id
 create or replace function public.current_user_role()
 returns text
 language sql
@@ -241,6 +268,123 @@ as $$
   select counter_id from public.profiles where id = auth.uid();
 $$;
 
+-- System-wide username uniqueness check across Admin, Counters, Representatives & Profiles
+create or replace function public.is_username_available(p_username text)
+returns boolean
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_clean text := lower(trim(coalesce(p_username, '')));
+begin
+  if v_clean = '' or v_clean = 'sajonvip' then
+    return false;
+  end if;
+
+  return not exists (
+    select 1 from public.profiles where lower(trim(email)) = v_clean
+  );
+end;
+$$;
+
+-- Super Admin Recovery: Reset Counter or Representative password, invalidate old sessions, and write audit log
+create or replace function public.admin_reset_account_password(
+  p_counter_id uuid,
+  p_target_role text,
+  p_new_password text
+)
+returns public.password_reset_logs
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+  v_caller_role text;
+  v_caller_username text;
+  v_profile public.profiles;
+  v_counter_name text;
+  v_log public.password_reset_logs;
+begin
+  select role, email into v_caller_role, v_caller_username
+  from public.profiles
+  where id = auth.uid();
+
+  if v_caller_role <> 'super_admin' then
+    raise exception 'শুধুমাত্র মাস্টার সুপার অ্যাডমিন পাসওয়ার্ড রিসেট করতে পারবেন';
+  end if;
+
+  if p_target_role not in ('counter_admin', 'counter_representative') then
+    raise exception 'অবৈধ অ্যাকাউন্ট রোল';
+  end if;
+
+  if length(coalesce(p_new_password, '')) < 6 then
+    raise exception 'নতুন পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে';
+  end if;
+
+  select * into v_profile
+  from public.profiles
+  where counter_id = p_counter_id
+    and role = p_target_role
+  order by created_at asc
+  limit 1;
+
+  if v_profile.id is null then
+    raise exception 'এই কাউন্টারে নির্ধারিত অ্যাকাউন্ট পাওয়া যায়নি';
+  end if;
+
+  select counter_name into v_counter_name
+  from public.counters
+  where id = p_counter_id;
+
+  update auth.users
+  set encrypted_password = crypt(p_new_password, gen_salt('bf')),
+      updated_at = now()
+  where id = v_profile.id;
+
+  -- Invalidate all active sessions for the reset account
+  begin
+    delete from auth.sessions where user_id = v_profile.id;
+  exception
+    when others then null;
+  end;
+
+  update public.profiles
+  set token_version = token_version + 1
+  where id = v_profile.id;
+
+  insert into public.password_reset_logs (
+    counter_id,
+    counter_name,
+    target_role,
+    target_username,
+    reset_by
+  ) values (
+    p_counter_id,
+    coalesce(v_counter_name, 'কাউন্টার'),
+    p_target_role,
+    v_profile.email,
+    coalesce(v_caller_username, 'Sajonvip')
+  )
+  returning * into v_log;
+
+  return v_log;
+end;
+$$;
+
+-- =============================================================================
+-- ROW LEVEL SECURITY (RLS) POLICIES
+-- =============================================================================
+
+alter table public.app_settings enable row level security;
+alter table public.counters enable row level security;
+alter table public.profiles enable row level security;
+alter table public.trips enable row level security;
+alter table public.seats enable row level security;
+alter table public.bookings enable row level security;
+alter table public.password_reset_logs enable row level security;
+
 -- app_settings: Public read, Super Admin write
 drop policy if exists "Public read app_settings" on public.app_settings;
 create policy "Public read app_settings" on public.app_settings for select using (true);
@@ -257,7 +401,7 @@ create policy "Super Admin manage counters" on public.counters for all
   using (public.current_user_role() = 'super_admin')
   with check (public.current_user_role() = 'super_admin');
 
--- trips: Public read, Super Admin & owning Counter Admin manage
+-- trips: Public read, Super Admin & owning Counter Admin manage (Representatives have NO write permissions)
 drop policy if exists "Public read trips" on public.trips;
 create policy "Public read trips" on public.trips for select using (true);
 drop policy if exists "Admin manage trips" on public.trips;
@@ -271,20 +415,33 @@ create policy "Admin manage trips" on public.trips for all
     or (public.current_user_role() = 'counter_admin' and counter_id = public.current_user_counter_id())
   );
 
--- seats: Public read, Admin/Counter Admin update
+-- seats: Public read, Super Admin & owning Counter Admin update (Representatives cannot write)
 drop policy if exists "Public read seats" on public.seats;
 create policy "Public read seats" on public.seats for select using (true);
 drop policy if exists "Admin manage seats" on public.seats;
 create policy "Admin manage seats" on public.seats for update
   using (
     public.current_user_role() = 'super_admin'
-    or exists (
-      select 1 from public.trips t
-      where t.id = seats.trip_id and t.counter_id = public.current_user_counter_id()
+    or (
+      public.current_user_role() = 'counter_admin'
+      and exists (
+        select 1 from public.trips t
+        where t.id = seats.trip_id and t.counter_id = public.current_user_counter_id()
+      )
+    )
+  )
+  with check (
+    public.current_user_role() = 'super_admin'
+    or (
+      public.current_user_role() = 'counter_admin'
+      and exists (
+        select 1 from public.trips t
+        where t.id = seats.trip_id and t.counter_id = public.current_user_counter_id()
+      )
     )
   );
 
--- bookings: Authenticated insert, scoped read/update
+-- bookings: Authenticated insert, scoped read/update (Representatives strictly read-only)
 drop policy if exists "Public create booking" on public.bookings;
 create policy "Public create booking" on public.bookings for insert
   with check (auth.uid() is not null);
@@ -313,6 +470,14 @@ create policy "Users insert own passenger profile" on public.profiles for insert
 drop policy if exists "Super Admin manage profiles" on public.profiles;
 create policy "Super Admin manage profiles" on public.profiles for all
   using (public.current_user_role() = 'super_admin')
+  with check (public.current_user_role() = 'super_admin');
+
+-- password_reset_logs: Super Admin only
+drop policy if exists "Super Admin read reset logs" on public.password_reset_logs;
+create policy "Super Admin read reset logs" on public.password_reset_logs for select
+  using (public.current_user_role() = 'super_admin');
+drop policy if exists "Super Admin insert reset logs" on public.password_reset_logs;
+create policy "Super Admin insert reset logs" on public.password_reset_logs for insert
   with check (public.current_user_role() = 'super_admin');
 
 -- Initial Default Branding Seed

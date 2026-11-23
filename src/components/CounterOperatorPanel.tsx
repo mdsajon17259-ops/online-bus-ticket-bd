@@ -1,20 +1,34 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Bus, Check, Eye, RefreshCw, Search, X } from 'lucide-react';
+import { Bus, Check, Edit3, Plus, RefreshCw, Search, Settings2, Trash2, X } from 'lucide-react';
 import {
+  createCounterTrip,
+  deleteCounterTrip,
   extractErrorMessage,
   fetchCounters,
   fetchOperatorBookings,
   fetchOperatorTrips,
   fetchTripSeats,
   isMasterSuperAdminProfile,
+  toggleCounterSeat,
   updateBookingStatus,
+  updateCounterTrip,
 } from '../lib/api';
-import { formatBanglaDateTime, formatBanglaNumber, formatBDT } from '../lib/format';
+import {
+  BANGLADESH_DISTRICTS,
+  formatBanglaDateTime,
+  formatBanglaNumber,
+  formatBDT,
+} from '../lib/format';
 import { useApp } from '../context/AppContext';
 import type { Booking, BookingStatus, Counter, Seat, Trip } from '../types';
 import { AuthScreen } from './AuthScreen';
 import { SeatMap } from './SeatMap';
 import { StatusBadge } from './StatusBadge';
+
+function toLocalDateTimeInput(isoStr: string): string {
+  if (!isoStr) return '';
+  return isoStr.slice(0, 16);
+}
 
 export function CounterOperatorPanel() {
   const { user, authLoading } = useApp();
@@ -31,15 +45,41 @@ export function CounterOperatorPanel() {
   const [loading, setLoading] = useState(true);
   const [actionId, setActionId] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
 
+  // Create Trip Form (strictly scoped to current counter)
+  const [showCreateTrip, setShowCreateTrip] = useState(false);
+  const [newFrom, setNewFrom] = useState('');
+  const [newTo, setNewTo] = useState('');
+  const [newDeparture, setNewDeparture] = useState('');
+  const [newBusType, setNewBusType] = useState('এসি বিজনেস ক্লাস কোচ');
+  const [newPrice, setNewPrice] = useState('1200');
+  const [newSeats, setNewSeats] = useState('36');
+  const [savingTrip, setSavingTrip] = useState(false);
+
+  // Edit Trip Modal
+  const [editingTrip, setEditingTrip] = useState<Trip | null>(null);
+  const [editFrom, setEditFrom] = useState('');
+  const [editTo, setEditTo] = useState('');
+  const [editDeparture, setEditDeparture] = useState('');
+  const [editBusType, setEditBusType] = useState('');
+  const [editPrice, setEditPrice] = useState('');
+
+  // Interactive Seat Manager Modal
   const [inspectTrip, setInspectTrip] = useState<Trip | null>(null);
   const [inspectSeats, setInspectSeats] = useState<Seat[]>([]);
   const [loadingSeats, setLoadingSeats] = useState(false);
+  const [togglingSeat, setTogglingSeat] = useState<string | null>(null);
 
   const isMasterSuperAdmin = isMasterSuperAdminProfile(user);
   const hasAccess = Boolean(
     user && ((user.role === 'counter_admin' && user.counter_id) || isMasterSuperAdmin)
   );
+
+  const showNotice = (msg: string) => {
+    setNotice(msg);
+    setTimeout(() => setNotice(''), 4000);
+  };
 
   const loadData = useCallback(async () => {
     if (!hasAccess || !user) return;
@@ -76,6 +116,7 @@ export function CounterOperatorPanel() {
     try {
       await updateBookingStatus(bookingId, nextStatus);
       await loadData();
+      showNotice('বুকিংয়ের অবস্থা আপডেট করা হয়েছে।');
     } catch (err) {
       setError(extractErrorMessage(err, 'বুকিং স্ট্যাটাস পরিবর্তন করা যায়নি'));
     } finally {
@@ -83,7 +124,85 @@ export function CounterOperatorPanel() {
     }
   };
 
-  const openSeatInspector = async (trip: Trip) => {
+  const handleCreateTrip = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const targetCounter = isMasterSuperAdmin
+      ? selectedAdminCounter || counters[0]?.id
+      : user?.counter_id || undefined;
+    if (!targetCounter) {
+      setError('ট্রিপ যোগ করার জন্য একটি কাউন্টার নির্বাচন করুন');
+      return;
+    }
+
+    setSavingTrip(true);
+    setError('');
+    try {
+      await createCounterTrip({
+        counter_id: targetCounter,
+        route_from: newFrom,
+        route_to: newTo,
+        departure_time: newDeparture,
+        bus_type: newBusType,
+        price: Number(newPrice),
+        total_seats: Number(newSeats),
+      });
+      setNewFrom('');
+      setNewTo('');
+      setNewDeparture('');
+      setShowCreateTrip(false);
+      await loadData();
+      showNotice('নতুন ট্রিপ সফলভাবে যোগ করা হয়েছে।');
+    } catch (err) {
+      setError(extractErrorMessage(err, 'ট্রিপ যোগ করা যায়নি'));
+    } finally {
+      setSavingTrip(false);
+    }
+  };
+
+  const openEditTrip = (trip: Trip) => {
+    setEditingTrip(trip);
+    setEditFrom(trip.route_from);
+    setEditTo(trip.route_to);
+    setEditDeparture(toLocalDateTimeInput(trip.departure_time));
+    setEditBusType(trip.bus_type);
+    setEditPrice(String(trip.price));
+  };
+
+  const handleSaveTripEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTrip) return;
+    setSavingTrip(true);
+    setError('');
+    try {
+      await updateCounterTrip(editingTrip.id, {
+        route_from: editFrom,
+        route_to: editTo,
+        departure_time: editDeparture,
+        bus_type: editBusType,
+        price: Number(editPrice),
+      });
+      setEditingTrip(null);
+      await loadData();
+      showNotice('ট্রিপের তথ্য ও ভাড়া আপডেট করা হয়েছে।');
+    } catch (err) {
+      setError(extractErrorMessage(err, 'ট্রিপ আপডেট করা যায়নি'));
+    } finally {
+      setSavingTrip(false);
+    }
+  };
+
+  const handleDeleteTrip = async (tripId: string) => {
+    setError('');
+    try {
+      await deleteCounterTrip(tripId);
+      await loadData();
+      showNotice('ট্রিপটি মুছে ফেলা হয়েছে।');
+    } catch (err) {
+      setError(extractErrorMessage(err, 'ট্রিপ মুছে ফেলা যায়নি'));
+    }
+  };
+
+  const openSeatManager = async (trip: Trip) => {
     setInspectTrip(trip);
     setLoadingSeats(true);
     try {
@@ -93,6 +212,25 @@ export function CounterOperatorPanel() {
       setInspectSeats([]);
     } finally {
       setLoadingSeats(false);
+    }
+  };
+
+  const handleToggleSeatStatus = async (seatNumber: string) => {
+    if (!inspectTrip || togglingSeat) return;
+    const seat = inspectSeats.find((s) => s.seat_number === seatNumber);
+    if (!seat) return;
+    const nextStatus = seat.status === 'booked' ? 'available' : 'booked';
+    setTogglingSeat(seatNumber);
+    setError('');
+    try {
+      await toggleCounterSeat(inspectTrip.id, seatNumber, nextStatus);
+      const updatedSeats = await fetchTripSeats(inspectTrip.id);
+      setInspectSeats(updatedSeats);
+      await loadData();
+    } catch (err) {
+      setError(extractErrorMessage(err, 'আসনের অবস্থা পরিবর্তন করা যায়নি'));
+    } finally {
+      setTogglingSeat(null);
     }
   };
 
@@ -135,7 +273,7 @@ export function CounterOperatorPanel() {
         requiredRole="counter_admin"
         redirectTo="operator"
         title="কাউন্টার অপারেটর লগইন"
-        subtitle="আপনার নির্দিষ্ট বাস কাউন্টারের বুকিং ও আসন পরিচালনা করতে অপারেটর অ্যাকাউন্ট দিয়ে লগইন করুন।"
+        subtitle="আপনার নির্দিষ্ট বাস কাউন্টারের ট্রিপ, আসন ও বুকিং পরিচালনা করতে কাউন্টার অ্যাকাউন্ট দিয়ে লগইন করুন।"
       />
     );
   }
@@ -155,11 +293,17 @@ export function CounterOperatorPanel() {
 
   return (
     <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-6">
+      <datalist id="counter-bd-districts">
+        {BANGLADESH_DISTRICTS.map((city) => (
+          <option key={city} value={city} />
+        ))}
+      </datalist>
+
       {/* Top Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-5">
         <div>
           <p className="text-xs font-semibold text-blue-700">
-            {isMasterSuperAdmin ? 'কাউন্টার পরিচালনা (সুপার অ্যাডমিন)' : 'নির্ধারিত কাউন্টার অপারেটর প্যানেল'}
+            {isMasterSuperAdmin ? 'কাউন্টার পরিচালনা (সুপার অ্যাডমিন)' : 'কাউন্টার কন্ট্রোল প্যানেল (পূর্ণ কাউন্টার ক্ষমতা)'}
           </p>
           <h1 className="font-display text-2xl sm:text-3xl font-bold text-slate-900 mt-0.5">
             {counterTitle}
@@ -167,8 +311,8 @@ export function CounterOperatorPanel() {
           <p className="text-xs text-slate-500 mt-1">
             ইউজারনেম: <strong className="font-mono text-slate-700">{user?.email}</strong> ·{' '}
             {isMasterSuperAdmin
-              ? 'সব কাউন্টার পর্যবেক্ষণ অনুমোদিত'
-              : 'আপনার সেশন শুধুমাত্র এই কাউন্টারের ট্রিপ, আসন ও বুকিংয়ে সীমাবদ্ধ'}
+              ? 'সব কাউন্টার পর্যবেক্ষণ ও সম্পাদনা অনুমোদিত'
+              : 'শুধুমাত্র এই কাউন্টারের ট্রিপ, ভাড়া, আসন ও বুকিং যোগ/সম্পাদনা ও পরিচালনা অনুমোদিত'}
           </p>
         </div>
 
@@ -232,6 +376,12 @@ export function CounterOperatorPanel() {
           {error}
         </div>
       )}
+      {notice && (
+        <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-sm text-emerald-800 flex items-center gap-2">
+          <Check className="w-4 h-4 shrink-0" />
+          <span>{notice}</span>
+        </div>
+      )}
 
       {/* Workspace Tabs */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -252,11 +402,11 @@ export function CounterOperatorPanel() {
               activeTab === 'trips' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            ট্রিপ ও আসন তালিকা ({formatBanglaNumber(trips.length)})
+            ট্রিপ ও আসন ব্যবস্থাপনা ({formatBanglaNumber(trips.length)})
           </button>
         </div>
 
-        {activeTab === 'bookings' && (
+        {activeTab === 'bookings' ? (
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
@@ -285,6 +435,15 @@ export function CounterOperatorPanel() {
               ))}
             </div>
           </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowCreateTrip((prev) => !prev)}
+            className="min-h-[40px] px-4 py-2 text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded-lg inline-flex items-center gap-1.5 transition-colors w-fit"
+          >
+            <Plus className="w-4 h-4" aria-hidden="true" />
+            <span>{showCreateTrip ? 'ফর্ম বন্ধ করুন' : 'নতুন ট্রিপ যোগ করুন'}</span>
+          </button>
         )}
       </div>
 
@@ -392,57 +551,270 @@ export function CounterOperatorPanel() {
         </div>
       )}
 
-      {/* Counter Trips & Live Seat Occupancy View */}
+      {/* Counter Trips & Interactive Seat Management View */}
       {activeTab === 'trips' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {trips.map((t) => {
-            const dt = formatBanglaDateTime(t.departure_time);
-            const avail = t.available_seats ?? t.total_seats;
-            const booked = t.total_seats - avail;
-            return (
-              <div
-                key={t.id}
-                className="bg-white border border-slate-200 rounded-xl p-5 flex items-center justify-between gap-4"
-              >
-                <div className="space-y-1">
-                  <p className="text-xs text-slate-500">
-                    {t.counter_name} · {t.bus_type}
-                  </p>
-                  <p className="font-display text-lg font-semibold text-slate-900">
-                    {t.route_from} → {t.route_to}
-                  </p>
-                  <p className="text-xs font-mono text-slate-600 tabular-nums">
-                    {dt.date} · {dt.time}
-                  </p>
-                  <p className="text-xs text-slate-600 tabular-nums pt-1">
-                    <strong>{formatBanglaNumber(booked)}টি</strong> বুকড ·{' '}
-                    <strong>{formatBanglaNumber(avail)}টি</strong> খালি (মোট{' '}
-                    {formatBanglaNumber(t.total_seats)}টি)
-                  </p>
-                </div>
+        <div className="space-y-6">
+          {showCreateTrip && (
+            <form
+              onSubmit={handleCreateTrip}
+              className="bg-white border border-slate-200 rounded-xl p-5 space-y-4"
+            >
+              <h2 className="font-display text-base font-bold text-slate-900">
+                কাউন্টারে নতুন ট্রিপ যুক্ত করুন
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                <input
+                  type="text"
+                  required
+                  list="counter-bd-districts"
+                  value={newFrom}
+                  onChange={(e) => setNewFrom(e.target.value)}
+                  placeholder="যাত্রা শুরু (যেমন: ঢাকা)"
+                  className="min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
+                />
+                <input
+                  type="text"
+                  required
+                  list="counter-bd-districts"
+                  value={newTo}
+                  onChange={(e) => setNewTo(e.target.value)}
+                  placeholder="গন্তব্য (যেমন: চট্টগ্রাম)"
+                  className="min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
+                />
+                <input
+                  type="datetime-local"
+                  required
+                  value={newDeparture}
+                  onChange={(e) => setNewDeparture(e.target.value)}
+                  className="min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700 tabular-nums"
+                />
+                <input
+                  type="text"
+                  required
+                  value={newBusType}
+                  onChange={(e) => setNewBusType(e.target.value)}
+                  placeholder="বাসের ধরন"
+                  className="min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
+                />
+                <input
+                  type="number"
+                  min="50"
+                  step="10"
+                  required
+                  value={newPrice}
+                  onChange={(e) => setNewPrice(e.target.value)}
+                  placeholder="টিকেট ভাড়া (৳)"
+                  className="min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700 tabular-nums"
+                />
+                <input
+                  type="number"
+                  min="8"
+                  max="60"
+                  step="4"
+                  required
+                  value={newSeats}
+                  onChange={(e) => setNewSeats(e.target.value)}
+                  placeholder="মোট আসন (৮–৬০)"
+                  className="min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700 tabular-nums"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => openSeatInspector(t)}
-                  className="min-h-[44px] px-4 py-2 text-xs font-semibold text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                  onClick={() => setShowCreateTrip(false)}
+                  className="min-h-[40px] px-4 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg"
                 >
-                  <Eye className="w-4 h-4" aria-hidden="true" />
-                  <span>আসন দেখুন</span>
+                  বাতিল
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingTrip}
+                  className="min-h-[40px] px-4 py-2 text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 disabled:opacity-60 rounded-lg"
+                >
+                  {savingTrip ? 'সংরক্ষণ হচ্ছে...' : 'ট্রিপ সংরক্ষণ করুন'}
                 </button>
               </div>
-            );
-          })}
-          {trips.length === 0 && (
-            <div className="md:col-span-2 bg-white border border-slate-200 rounded-xl p-10 text-center">
-              <Bus className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-              <p className="text-sm font-semibold text-slate-900">
-                এই কাউন্টারে কোনো ট্রিপ নির্ধারিত নেই
-              </p>
-            </div>
+            </form>
           )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {trips.map((t) => {
+              const dt = formatBanglaDateTime(t.departure_time);
+              const avail = t.available_seats ?? t.total_seats;
+              const booked = t.total_seats - avail;
+              return (
+                <div
+                  key={t.id}
+                  className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col justify-between gap-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <p className="text-xs text-slate-500">
+                        {t.counter_name} · {t.bus_type}
+                      </p>
+                      <p className="font-display text-lg font-semibold text-slate-900">
+                        {t.route_from} → {t.route_to}
+                      </p>
+                      <p className="text-xs font-mono text-slate-600 tabular-nums">
+                        {dt.date} · {dt.time}
+                      </p>
+                      <p className="text-xs font-semibold text-blue-700 tabular-nums">
+                        ভাড়া: {formatBDT(t.price)}
+                      </p>
+                      <p className="text-xs text-slate-600 tabular-nums pt-1">
+                        <strong>{formatBanglaNumber(booked)}টি</strong> বুকড ·{' '}
+                        <strong>{formatBanglaNumber(avail)}টি</strong> খালি (মোট{' '}
+                        {formatBanglaNumber(t.total_seats)}টি)
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => openSeatManager(t)}
+                      className="min-h-[40px] px-3.5 py-2 text-xs font-semibold text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-lg inline-flex items-center gap-1.5"
+                    >
+                      <Settings2 className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>আসন পরিচালনা</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openEditTrip(t)}
+                      className="min-h-[40px] px-3.5 py-2 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg inline-flex items-center gap-1.5"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>ট্রিপ সম্পাদনা</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteTrip(t.id)}
+                      className="min-h-[40px] px-3 py-2 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg inline-flex items-center gap-1.5 ml-auto"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>মুছুন</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+            {trips.length === 0 && (
+              <div className="md:col-span-2 bg-white border border-slate-200 rounded-xl p-10 text-center">
+                <Bus className="w-8 h-8 text-slate-400 mx-auto mb-2" />
+                <p className="text-sm font-semibold text-slate-900">
+                  এই কাউন্টারে কোনো ট্রিপ নির্ধারিত নেই
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      {/* Seat Inspector Modal */}
+      {/* Edit Trip Modal */}
+      {editingTrip && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <form
+            onSubmit={handleSaveTripEdit}
+            className="bg-white rounded-2xl border border-slate-200 w-full max-w-md p-6 space-y-4"
+          >
+            <div className="flex items-center justify-between">
+              <h2 className="font-display text-lg font-bold text-slate-900">
+                কাউন্টার ট্রিপ সম্পাদনা করুন
+              </h2>
+              <button
+                type="button"
+                onClick={() => setEditingTrip(null)}
+                aria-label="বন্ধ করুন"
+                className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-600 mb-1">যাত্রা শুরু</label>
+                  <input
+                    type="text"
+                    required
+                    list="counter-bd-districts"
+                    value={editFrom}
+                    onChange={(e) => setEditFrom(e.target.value)}
+                    className="w-full min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-600 mb-1">গন্তব্য</label>
+                  <input
+                    type="text"
+                    required
+                    list="counter-bd-districts"
+                    value={editTo}
+                    onChange={(e) => setEditTo(e.target.value)}
+                    className="w-full min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-slate-600 mb-1">যাত্রার সময়</label>
+                <input
+                  type="datetime-local"
+                  required
+                  value={editDeparture}
+                  onChange={(e) => setEditDeparture(e.target.value)}
+                  className="w-full min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700 tabular-nums"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-slate-600 mb-1">বাসের ধরন</label>
+                <input
+                  type="text"
+                  required
+                  value={editBusType}
+                  onChange={(e) => setEditBusType(e.target.value)}
+                  className="w-full min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-slate-600 mb-1">টিকেট ভাড়া (৳)</label>
+                <input
+                  type="number"
+                  min="50"
+                  step="10"
+                  required
+                  value={editPrice}
+                  onChange={(e) => setEditPrice(e.target.value)}
+                  className="w-full min-h-[42px] px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700 tabular-nums"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setEditingTrip(null)}
+                className="min-h-[42px] px-4 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg"
+              >
+                বাতিল
+              </button>
+              <button
+                type="submit"
+                disabled={savingTrip}
+                className="min-h-[42px] px-5 py-2 text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 disabled:opacity-60 rounded-lg"
+              >
+                {savingTrip ? 'আপডেট হচ্ছে...' : 'পরিবর্তন সংরক্ষণ'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Interactive Seat Manager Modal */}
       {inspectTrip && (
         <div
           className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4"
@@ -455,7 +827,9 @@ export function CounterOperatorPanel() {
                 <h2 className="font-display text-base font-bold text-slate-900">
                   {inspectTrip.route_from} → {inspectTrip.route_to}
                 </h2>
-                <p className="text-xs text-slate-500">লাইভ আসন অবস্থা</p>
+                <p className="text-xs text-slate-500">
+                  আসন পরিবর্তন করতে যেকোনো আসনে ক্লিক করুন (খালি ↔ বুকড)
+                </p>
               </div>
               <button
                 type="button"
@@ -470,7 +844,12 @@ export function CounterOperatorPanel() {
               {loadingSeats ? (
                 <div className="h-64 bg-slate-100 rounded-xl animate-pulse" />
               ) : (
-                <SeatMap seats={inspectSeats} selectedSeats={[]} readOnly />
+                <SeatMap
+                  seats={inspectSeats}
+                  selectedSeats={[]}
+                  allowBookedClick
+                  onToggleSeat={handleToggleSeatStatus}
+                />
               )}
             </div>
           </div>
