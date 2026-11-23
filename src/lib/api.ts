@@ -896,6 +896,40 @@ export async function updateBookingStatus(
   );
 }
 
+export async function createCounterBooking(payload: {
+  trip_id: string;
+  passenger_name: string;
+  phone: string;
+  boarding_point: string;
+  selected_seats: string[];
+  status?: 'pending' | 'confirmed';
+  total_fare?: number;
+}): Promise<Booking> {
+  await ensureSupabaseClient();
+  if (isSupabaseConfigured && supabase) {
+    const { data, error } = await supabase.rpc('staff_create_booking', {
+      p_token: requireStaffToken(),
+      p_trip_id: payload.trip_id,
+      p_passenger_name: payload.passenger_name.trim(),
+      p_phone: payload.phone.trim(),
+      p_boarding_point: payload.boarding_point.trim(),
+      p_selected_seats: payload.selected_seats,
+      p_status: payload.status || 'confirmed',
+      p_total_fare:
+        typeof payload.total_fare === 'number' && Number.isFinite(payload.total_fare)
+          ? payload.total_fare
+          : null,
+    });
+    if (error) throw handleSupabaseRpcError(error, 'টিকিট বুকিং সম্পন্ন করা যায়নি');
+    return data as Booking;
+  }
+
+  return apiFetch<Booking>('/api/operator/bookings', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 // =============================================================================
 // SUPER ADMIN ACTIONS
 // =============================================================================

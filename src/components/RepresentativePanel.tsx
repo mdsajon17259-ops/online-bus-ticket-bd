@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Bus, Eye, Lock, RefreshCw, Search, Ticket, X } from 'lucide-react';
+import { Bus, Eye, FileText, Lock, RefreshCw, Search, Ticket, X } from 'lucide-react';
 import {
   extractErrorMessage,
   fetchOperatorBookings,
@@ -13,15 +13,17 @@ import type { Booking, BookingStatus, Seat, Trip } from '../types';
 import { AuthScreen } from './AuthScreen';
 import { SeatMap } from './SeatMap';
 import { StatusBadge } from './StatusBadge';
+import { TicketSlipModal } from './TicketSlipModal';
 
 export function RepresentativePanel() {
-  const { user, authLoading } = useApp();
+  const { user, authLoading, settings } = useApp();
 
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [trips, setTrips] = useState<Trip[]>([]);
 
   const [activeTab, setActiveTab] = useState<'bookings' | 'trips'>('bookings');
   const [statusFilter, setStatusFilter] = useState<'all' | BookingStatus>('all');
+  const [tripFilterId, setTripFilterId] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
 
   const [loading, setLoading] = useState(true);
@@ -30,6 +32,9 @@ export function RepresentativePanel() {
   const [inspectTrip, setInspectTrip] = useState<Trip | null>(null);
   const [inspectSeats, setInspectSeats] = useState<Seat[]>([]);
   const [loadingSeats, setLoadingSeats] = useState(false);
+
+  // Strictly read-only Ticket Slip viewer
+  const [slipBooking, setSlipBooking] = useState<Booking | null>(null);
 
   const isMasterSuperAdmin = isMasterSuperAdminProfile(user);
   const hasAccess = Boolean(
@@ -73,21 +78,36 @@ export function RepresentativePanel() {
     }
   };
 
+  const getPendingSeatsForTrip = useCallback(
+    (tripId: string) => {
+      const list: string[] = [];
+      bookings.forEach((b) => {
+        if (b.trip_id === tripId && b.status === 'pending') {
+          list.push(...b.selected_seats);
+        }
+      });
+      return list;
+    },
+    [bookings]
+  );
+
   const filteredBookings = useMemo(() => {
     return bookings.filter((b) => {
       if (statusFilter !== 'all' && b.status !== statusFilter) return false;
+      if (tripFilterId && b.trip_id !== tripFilterId) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const match =
           b.id.toLowerCase().includes(q) ||
           b.passenger_name.toLowerCase().includes(q) ||
           b.phone.toLowerCase().includes(q) ||
+          b.selected_seats.join(' ').toLowerCase().includes(q) ||
           (b.trip ? `${b.trip.route_from} ${b.trip.route_to}`.toLowerCase().includes(q) : false);
         if (!match) return false;
       }
       return true;
     });
-  }, [bookings, statusFilter, searchQuery]);
+  }, [bookings, statusFilter, tripFilterId, searchQuery]);
 
   const metrics = useMemo(() => {
     const confirmedList = bookings.filter((b) => b.status === 'confirmed');
@@ -118,6 +138,7 @@ export function RepresentativePanel() {
       confirmedRevenue,
       tripsCount: trips.length,
       bookedSeatsTotal: Math.max(0, totalTripSeats - totalAvailableSeats),
+      totalAvailableSeats,
     };
   }, [bookings, trips]);
 
@@ -147,8 +168,19 @@ export function RepresentativePanel() {
     cancelled: 'বাতিল',
   };
 
+  const inspectPendingSeats = inspectTrip ? getPendingSeatsForTrip(inspectTrip.id) : [];
+  const inspectPendingSet = new Set(inspectPendingSeats);
+  const inspectPendingCount = inspectSeats.filter(
+    (s) => s.status === 'booked' && inspectPendingSet.has(s.seat_number)
+  ).length;
+  const inspectConfirmedCount = inspectSeats.filter(
+    (s) => s.status === 'booked' && !inspectPendingSet.has(s.seat_number)
+  ).length;
+  const inspectAvailableCount =
+    inspectSeats.length - inspectPendingCount - inspectConfirmedCount;
+
   return (
-    <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-6">
+    <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
       {/* Top Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-5">
         <div>
@@ -160,14 +192,14 @@ export function RepresentativePanel() {
             {user?.counter_name || 'নির্ধারিত কাউন্টার'}
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            প্রতিনিধি ইউজারনেম: <strong className="font-mono text-slate-700">{user?.email}</strong> · এই প্যানেল থেকে শুধুমাত্র নির্ধারিত কাউন্টারের টিকেট বিক্রির হিসাব ও বুকিং রিপোর্ট দেখা যাবে। কোনো তথ্য পরিবর্তন অনুমোদিত নয়।
+            প্রতিনিধি ইউজারনেম: <strong className="font-mono text-slate-700">{user?.email}</strong> · এই প্যানেল থেকে শুধুমাত্র নির্ধারিত কাউন্টারের টিকেট বিক্রি, অপেক্ষমাণ/নিশ্চিত আসন ও বুকিং রিপোর্ট দেখা যাবে। কোনো তথ্য পরিবর্তন অনুমোদিত নয়।
           </p>
         </div>
 
         <button
           type="button"
           onClick={loadData}
-          className="min-h-[40px] px-4 py-2 text-xs font-semibold text-slate-800 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg inline-flex items-center gap-2 transition-colors whitespace-nowrap shrink-0 self-start sm:self-auto"
+          className="min-h-[44px] px-4 py-2 text-xs font-semibold text-slate-800 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg inline-flex items-center gap-2 transition-colors whitespace-nowrap shrink-0 self-start sm:self-auto"
         >
           <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />
           <span>রিফ্রেশ</span>
@@ -175,7 +207,7 @@ export function RepresentativePanel() {
       </div>
 
       {/* Metrics Strip */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="bg-white border border-slate-200 rounded-xl p-4">
           <p className="text-xs text-slate-500">মোট বিক্রি হওয়া টিকেট</p>
           <p className="font-mono text-2xl font-bold text-emerald-700 tabular-nums mt-1">
@@ -202,12 +234,12 @@ export function RepresentativePanel() {
           <p className="text-xs text-slate-500 mt-1">শুধুমাত্র নিশ্চিত টিকেট</p>
         </div>
         <div className="bg-white border border-slate-200 rounded-xl p-4">
-          <p className="text-xs text-slate-500">সক্রিয় ট্রিপ ও আসন</p>
+          <p className="text-xs text-slate-500">বুকড ও খালি সিট ({formatBanglaNumber(metrics.tripsCount)} ট্রিপ)</p>
           <p className="font-mono text-2xl font-bold text-slate-900 tabular-nums mt-1">
-            {formatBanglaNumber(metrics.tripsCount)}টি
+            {formatBanglaNumber(metrics.bookedSeatsTotal)} / {formatBanglaNumber(metrics.totalAvailableSeats)}
           </p>
           <p className="text-xs text-slate-500 mt-1 tabular-nums">
-            মোট {formatBanglaNumber(metrics.bookedSeatsTotal)}টি আসন সংরক্ষিত
+            বুকড · খালি সিট
           </p>
         </div>
       </div>
@@ -219,12 +251,12 @@ export function RepresentativePanel() {
       )}
 
       {/* Tabs */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg w-fit">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg overflow-x-auto max-w-full">
           <button
             type="button"
             onClick={() => setActiveTab('bookings')}
-            className={`px-4 py-2 text-xs font-semibold rounded-md transition-colors whitespace-nowrap inline-flex items-center gap-1.5 ${
+            className={`min-h-[40px] px-3.5 py-2 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 inline-flex items-center gap-1.5 ${
               activeTab === 'bookings' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
@@ -234,7 +266,7 @@ export function RepresentativePanel() {
           <button
             type="button"
             onClick={() => setActiveTab('trips')}
-            className={`px-4 py-2 text-xs font-semibold rounded-md transition-colors whitespace-nowrap inline-flex items-center gap-1.5 ${
+            className={`min-h-[40px] px-3.5 py-2 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 inline-flex items-center gap-1.5 ${
               activeTab === 'trips' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
@@ -245,25 +277,41 @@ export function RepresentativePanel() {
 
         {activeTab === 'bookings' && (
           <div className="flex flex-wrap items-center gap-2">
-            <div className="relative">
+            <div className="relative flex-1 sm:flex-initial">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="যাত্রী, মোবাইল বা আইডি খুঁজুন..."
+                placeholder="যাত্রী, মোবাইল, সিট বা আইডি..."
                 aria-label="বুকিং খুঁজুন"
-                className="min-h-[40px] pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700 w-56"
+                className="min-h-[42px] pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700 w-full sm:w-52"
               />
             </div>
 
-            <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
+            {trips.length > 0 && (
+              <select
+                aria-label="ট্রিপ অনুযায়ী ফিল্টার"
+                value={tripFilterId}
+                onChange={(e) => setTripFilterId(e.target.value)}
+                className="min-h-[42px] px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700 max-w-[200px]"
+              >
+                <option value="">সকল ট্রিপ</option>
+                {trips.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.route_from} → {t.route_to} ({formatBanglaDateTime(t.departure_time).time})
+                  </option>
+                ))}
+              </select>
+            )}
+
+            <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg overflow-x-auto">
               {(['all', 'confirmed', 'pending', 'cancelled'] as const).map((st) => (
                 <button
                   key={st}
                   type="button"
                   onClick={() => setStatusFilter(st)}
-                  className={`px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  className={`min-h-[34px] px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
                     statusFilter === st ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
@@ -275,7 +323,7 @@ export function RepresentativePanel() {
         )}
       </div>
 
-      {/* Read-only Bookings Report Table */}
+      {/* Read-only Bookings Report */}
       {activeTab === 'bookings' && (
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
           {loading ? (
@@ -292,66 +340,141 @@ export function RepresentativePanel() {
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-500">
-                    <th className="py-3 px-4">বুকিং আইডি</th>
-                    <th className="py-3 px-4">যাত্রীর তথ্য</th>
-                    <th className="py-3 px-4">রুট ও সময়</th>
-                    <th className="py-3 px-4">আসন ও সংখ্যা</th>
-                    <th className="py-3 px-4 text-right">মোট ভাড়া</th>
-                    <th className="py-3 px-4">অবস্থা</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-sm">
-                  {filteredBookings.map((b) => {
-                    const dt = b.trip ? formatBanglaDateTime(b.trip.departure_time) : null;
-                    return (
-                      <tr key={b.id} className="hover:bg-slate-50/70 transition-colors">
-                        <td className="py-3 px-4 font-mono text-xs font-semibold text-slate-900 tabular-nums whitespace-nowrap">
-                          {b.id}
-                        </td>
-                        <td className="py-3 px-4">
-                          <div className="font-medium text-slate-900">{b.passenger_name}</div>
-                          <div className="text-xs font-mono text-slate-500 tabular-nums">
-                            {b.phone}
-                          </div>
-                        </td>
-                        <td className="py-3 px-4">
-                          {b.trip && (
-                            <>
-                              <div className="font-medium text-slate-900">
-                                {b.trip.route_from} → {b.trip.route_to}
-                              </div>
-                              <div className="text-xs text-slate-500 tabular-nums">
-                                {dt ? `${dt.date} · ${dt.time}` : b.trip.departure_time}
-                                {' · '}
-                                {b.boarding_point || 'প্রধান কাউন্টার'}
-                              </div>
-                            </>
-                          )}
-                        </td>
-                        <td className="py-3 px-4">
-                          <div className="font-mono text-xs font-semibold text-slate-800 tabular-nums">
+            <>
+              {/* Mobile Cards (< md) */}
+              <div className="md:hidden divide-y divide-slate-200">
+                {filteredBookings.map((b) => {
+                  const dt = b.trip ? formatBanglaDateTime(b.trip.departure_time) : null;
+                  return (
+                    <div key={b.id} className="p-4 space-y-2.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <span className="font-mono text-xs font-bold text-slate-900 tabular-nums">
+                            {b.id}
+                          </span>
+                          <p className="font-semibold text-slate-900 text-sm mt-0.5 truncate">
+                            {b.passenger_name}
+                          </p>
+                          <p className="text-xs font-mono text-slate-500 tabular-nums">{b.phone}</p>
+                        </div>
+                        <StatusBadge status={b.status} />
+                      </div>
+
+                      {b.trip && (
+                        <div className="text-xs text-slate-600 bg-slate-50 rounded-lg p-2.5">
+                          <p className="font-medium text-slate-900">
+                            {b.trip.route_from} → {b.trip.route_to}
+                          </p>
+                          <p className="tabular-nums mt-0.5">
+                            {dt ? `${dt.date} · ${dt.time}` : b.trip.departure_time} ·{' '}
+                            {b.boarding_point || 'প্রধান কাউন্টার'}
+                          </p>
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-between pt-1">
+                        <div className="text-xs">
+                          <span className="text-slate-500">সিট: </span>
+                          <span className="font-mono font-bold text-slate-900 tabular-nums">
                             {b.selected_seats.join(', ')}
-                          </div>
-                          <div className="text-[11px] text-slate-500">
-                            {formatBanglaNumber(b.selected_seats.length)}টি টিকেট
-                          </div>
-                        </td>
-                        <td className="py-3 px-4 font-mono text-sm font-semibold text-slate-900 text-right tabular-nums whitespace-nowrap">
+                          </span>{' '}
+                          <span className="text-slate-500">
+                            ({formatBanglaNumber(b.selected_seats.length)}টি)
+                          </span>
+                        </div>
+                        <span className="font-mono text-base font-bold text-slate-900 tabular-nums">
                           {formatBDT(b.total_fare)}
-                        </td>
-                        <td className="py-3 px-4">
-                          <StatusBadge status={b.status} />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                        </span>
+                      </div>
+
+                      <div className="pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setSlipBooking(b)}
+                          className="w-full min-h-[42px] px-3 py-2 text-xs font-semibold text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-lg inline-flex items-center justify-center gap-1.5"
+                        >
+                          <FileText className="w-3.5 h-3.5" aria-hidden="true" />
+                          <span>টিকিট বিবরণী দেখুন (Read-Only)</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Desktop Table (>= md) */}
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-500">
+                      <th className="py-3 px-4">বুকিং আইডি</th>
+                      <th className="py-3 px-4">যাত্রীর তথ্য</th>
+                      <th className="py-3 px-4">রুট ও সময়</th>
+                      <th className="py-3 px-4">আসন ও সংখ্যা</th>
+                      <th className="py-3 px-4 text-right">মোট ভাড়া</th>
+                      <th className="py-3 px-4">অবস্থা</th>
+                      <th className="py-3 px-4 text-right">স্লিপ</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-sm">
+                    {filteredBookings.map((b) => {
+                      const dt = b.trip ? formatBanglaDateTime(b.trip.departure_time) : null;
+                      return (
+                        <tr key={b.id} className="hover:bg-slate-50/70 transition-colors">
+                          <td className="py-3 px-4 font-mono text-xs font-semibold text-slate-900 tabular-nums whitespace-nowrap">
+                            {b.id}
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="font-medium text-slate-900">{b.passenger_name}</div>
+                            <div className="text-xs font-mono text-slate-500 tabular-nums">
+                              {b.phone}
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            {b.trip && (
+                              <>
+                                <div className="font-medium text-slate-900">
+                                  {b.trip.route_from} → {b.trip.route_to}
+                                </div>
+                                <div className="text-xs text-slate-500 tabular-nums">
+                                  {dt ? `${dt.date} · ${dt.time}` : b.trip.departure_time}
+                                  {' · '}
+                                  {b.boarding_point || 'প্রধান কাউন্টার'}
+                                </div>
+                              </>
+                            )}
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="font-mono text-xs font-semibold text-slate-800 tabular-nums">
+                              {b.selected_seats.join(', ')}
+                            </div>
+                            <div className="text-[11px] text-slate-500">
+                              {formatBanglaNumber(b.selected_seats.length)}টি টিকেট
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 font-mono text-sm font-semibold text-slate-900 text-right tabular-nums whitespace-nowrap">
+                            {formatBDT(b.total_fare)}
+                          </td>
+                          <td className="py-3 px-4">
+                            <StatusBadge status={b.status} />
+                          </td>
+                          <td className="py-3 px-4 text-right whitespace-nowrap">
+                            <button
+                              type="button"
+                              onClick={() => setSlipBooking(b)}
+                              className="min-h-[36px] px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md inline-flex items-center gap-1"
+                            >
+                              <FileText className="w-3.5 h-3.5" aria-hidden="true" />
+                              <span>দেখুন</span>
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
       )}
@@ -363,10 +486,11 @@ export function RepresentativePanel() {
             const dt = formatBanglaDateTime(t.departure_time);
             const avail = t.available_seats ?? t.total_seats;
             const booked = t.total_seats - avail;
+            const pendingOnTrip = getPendingSeatsForTrip(t.id).length;
             return (
               <div
                 key={t.id}
-                className="bg-white border border-slate-200 rounded-xl p-5 flex items-center justify-between gap-4"
+                className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
               >
                 <div className="space-y-1">
                   <p className="text-xs text-slate-500">
@@ -379,18 +503,21 @@ export function RepresentativePanel() {
                     {dt.date} · {dt.time} · ভাড়া: {formatBDT(t.price)}
                   </p>
                   <p className="text-xs text-slate-600 tabular-nums pt-1">
-                    <strong>{formatBanglaNumber(booked)}টি</strong> বুকড ·{' '}
-                    <strong>{formatBanglaNumber(avail)}টি</strong> খালি (মোট{' '}
+                    <strong>{formatBanglaNumber(booked)}টি</strong> বুকড
+                    {pendingOnTrip > 0
+                      ? ` (${formatBanglaNumber(pendingOnTrip)}টি অপেক্ষমাণ)`
+                      : ''}{' '}
+                    · <strong>{formatBanglaNumber(avail)}টি</strong> খালি (মোট{' '}
                     {formatBanglaNumber(t.total_seats)}টি)
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => openReadOnlySeatModal(t)}
-                  className="min-h-[44px] px-4 py-2 text-xs font-semibold text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                  className="min-h-[44px] px-4 py-2 text-xs font-semibold text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-lg inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
                 >
                   <Eye className="w-4 h-4" aria-hidden="true" />
-                  <span>আসন দেখুন</span>
+                  <span>আসন অবস্থা দেখুন</span>
                 </button>
               </div>
             );
@@ -425,20 +552,58 @@ export function RepresentativePanel() {
                 type="button"
                 onClick={() => setInspectTrip(null)}
                 aria-label="বন্ধ করুন"
-                className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
+                className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="p-5 overflow-y-auto">
+            <div className="p-5 overflow-y-auto space-y-4">
+              {!loadingSeats && (
+                <div className="grid grid-cols-3 gap-2 text-center text-xs tabular-nums">
+                  <div className="p-2 rounded-lg bg-slate-50 border border-slate-200">
+                    <span className="text-slate-500 block">খালি সিট</span>
+                    <strong className="font-mono text-sm text-slate-900">
+                      {formatBanglaNumber(inspectAvailableCount)}
+                    </strong>
+                  </div>
+                  <div className="p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-900">
+                    <span className="block">অপেক্ষমাণ</span>
+                    <strong className="font-mono text-sm">
+                      {formatBanglaNumber(inspectPendingCount)}
+                    </strong>
+                  </div>
+                  <div className="p-2 rounded-lg bg-rose-50 border border-rose-200 text-rose-900">
+                    <span className="block">কাটা / নিশ্চিত</span>
+                    <strong className="font-mono text-sm">
+                      {formatBanglaNumber(inspectConfirmedCount)}
+                    </strong>
+                  </div>
+                </div>
+              )}
+
               {loadingSeats ? (
                 <div className="h-64 bg-slate-100 rounded-xl animate-pulse" />
               ) : (
-                <SeatMap seats={inspectSeats} selectedSeats={[]} readOnly />
+                <SeatMap
+                  seats={inspectSeats}
+                  selectedSeats={[]}
+                  pendingSeats={inspectPendingSeats}
+                  showPendingLegend
+                  readOnly
+                />
               )}
             </div>
           </div>
         </div>
+      )}
+
+      {/* Strictly Read-Only Ticket Summary Modal (NO edit/confirm/cancel actions passed) */}
+      {slipBooking && (
+        <TicketSlipModal
+          booking={slipBooking}
+          organizationName={settings.organization_name}
+          onClose={() => setSlipBooking(null)}
+        />
       )}
     </main>
   );

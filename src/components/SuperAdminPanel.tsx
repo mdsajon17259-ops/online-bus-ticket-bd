@@ -987,7 +987,104 @@ export function SuperAdminPanel() {
                     প্রতিটি কাউন্টারের ইউজারনেম, প্রতিনিধি ইউজারনেম দেখুন এবং প্রয়োজনে পাসওয়ার্ড রিসেট করুন।
                   </p>
                 </div>
-                <div className="overflow-x-auto">
+
+                {/* Mobile Cards (< md) */}
+                <div className="md:hidden divide-y divide-slate-200">
+                  {counters.map((c) => {
+                    const opUser =
+                      c.operator_username ||
+                      users.find((u) => u.role === 'counter_admin' && u.counter_id === c.id)?.email ||
+                      '';
+                    const repUser =
+                      c.representative_username ||
+                      users.find((u) => u.role === 'counter_representative' && u.counter_id === c.id)?.email ||
+                      '';
+                    return (
+                      <div key={c.id} className="p-4 space-y-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="font-semibold text-slate-900">{c.counter_name}</div>
+                            <div className="text-xs font-mono text-slate-500 tabular-nums">{c.phone}</div>
+                            <div className="text-xs text-slate-500">{c.address}</div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              setError('');
+                              try {
+                                await deleteCounter(c.id);
+                                await loadAdminData();
+                              } catch (err) {
+                                setError(extractErrorMessage(err, 'কাউন্টার মুছে ফেলা যায়নি'));
+                              }
+                            }}
+                            aria-label={`${c.counter_name} মুছুন`}
+                            className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-2 text-xs bg-slate-50 rounded-lg p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-slate-500">কাউন্টার ইউজারনেম:</span>
+                            <span className="font-mono font-semibold text-blue-700">
+                              {opUser || 'নির্ধারিত নয়'}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-slate-500">প্রতিনিধি ইউজারনেম:</span>
+                            <span className="font-mono font-semibold text-amber-800">
+                              {repUser || 'নির্ধারিত নয়'}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-2">
+                          <button
+                            type="button"
+                            disabled={!opUser}
+                            onClick={() => {
+                              setResetModal({
+                                counterId: c.id,
+                                counterName: c.counter_name,
+                                targetRole: 'counter_admin',
+                                targetUsername: opUser,
+                              });
+                              setResetNewPassword('');
+                              setError('');
+                            }}
+                            className="min-h-[44px] px-3 py-2 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 disabled:opacity-40 rounded-lg inline-flex items-center justify-center gap-1.5"
+                          >
+                            <KeyRound className="w-3.5 h-3.5" aria-hidden="true" />
+                            <span>Reset Counter Password</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!repUser}
+                            onClick={() => {
+                              setResetModal({
+                                counterId: c.id,
+                                counterName: c.counter_name,
+                                targetRole: 'counter_representative',
+                                targetUsername: repUser,
+                              });
+                              setResetNewPassword('');
+                              setError('');
+                            }}
+                            className="min-h-[44px] px-3 py-2 text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 disabled:opacity-40 rounded-lg inline-flex items-center justify-center gap-1.5"
+                          >
+                            <KeyRound className="w-3.5 h-3.5" aria-hidden="true" />
+                            <span>Reset Representative Password</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Desktop Table (>= md) */}
+                <div className="hidden md:block overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-500">
@@ -1036,7 +1133,7 @@ export function SuperAdminPanel() {
                                     setResetNewPassword('');
                                     setError('');
                                   }}
-                                  className="min-h-[34px] px-2.5 py-1 text-[11px] font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 disabled:opacity-40 rounded-md inline-flex items-center gap-1 whitespace-nowrap"
+                                  className="min-h-[36px] px-2.5 py-1 text-[11px] font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 disabled:opacity-40 rounded-md inline-flex items-center gap-1 whitespace-nowrap"
                                 >
                                   <KeyRound className="w-3 h-3" aria-hidden="true" />
                                   <span>Reset Counter Password</span>
@@ -1054,7 +1151,7 @@ export function SuperAdminPanel() {
                                     setResetNewPassword('');
                                     setError('');
                                   }}
-                                  className="min-h-[34px] px-2.5 py-1 text-[11px] font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 disabled:opacity-40 rounded-md inline-flex items-center gap-1 whitespace-nowrap"
+                                  className="min-h-[36px] px-2.5 py-1 text-[11px] font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 disabled:opacity-40 rounded-md inline-flex items-center gap-1 whitespace-nowrap"
                                 >
                                   <KeyRound className="w-3 h-3" aria-hidden="true" />
                                   <span>Reset Representative Password</span>

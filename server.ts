@@ -1333,6 +1333,153 @@ async function startServer() {
     }
   });
 
+  app.post('/api/operator/bookings', requireOperatorOrAdmin, (req: AuthedRequest, res) => {
+    const {
+      trip_id,
+      passenger_name,
+      phone,
+      boarding_point,
+      selected_seats,
+      status,
+      total_fare,
+    } = req.body as {
+      trip_id?: string;
+      passenger_name?: string;
+      phone?: string;
+      boarding_point?: string;
+      selected_seats?: string[];
+      status?: 'pending' | 'confirmed';
+      total_fare?: number;
+    };
+
+    const finalStatus = status === 'pending' ? 'pending' : 'confirmed';
+    if (
+      !trip_id ||
+      !passenger_name?.trim() ||
+      !phone?.trim() ||
+      !Array.isArray(selected_seats) ||
+      selected_seats.length === 0
+    ) {
+      res.status(400).json({ error: 'ট্রিপ, যাত্রীর নাম, মোবাইল নম্বর এবং কমপক্ষে একটি আসন প্রয়োজন' });
+      return;
+    }
+
+    try {
+      const created = db.transaction(() => {
+        const trip = db
+          .prepare(
+            'SELECT t.*, c.counter_name FROM trips t JOIN counters c ON c.id = t.counter_id WHERE t.id = ?'
+          )
+          .get(trip_id) as
+          | {
+              id: string;
+              price: number;
+              route_from: string;
+              route_to: string;
+              departure_time: string;
+              bus_type: string;
+              counter_id: string;
+              counter_name: string;
+            }
+          | undefined;
+
+        if (!trip) {
+          throw new Error('TRIP_NOT_FOUND');
+        }
+        if (req.user!.role === 'counter_admin' && trip.counter_id !== req.user!.counter_id) {
+          throw new Error('FORBIDDEN_COUNTER');
+        }
+
+        const placeholders = selected_seats.map(() => '?').join(',');
+        const seatRows = db
+          .prepare(`SELECT * FROM seats WHERE trip_id = ? AND seat_number IN (${placeholders})`)
+          .all(trip_id, ...selected_seats) as Array<{
+          id: string;
+          seat_number: string;
+          status: string;
+        }>;
+
+        if (seatRows.length !== selected_seats.length) {
+          throw new Error('INVALID_SEATS');
+        }
+        const alreadyBooked = seatRows.filter((s) => s.status !== 'available');
+        if (alreadyBooked.length > 0) {
+          throw new Error(`SEATS_UNAVAILABLE:${alreadyBooked.map((s) => s.seat_number).join(', ')}`);
+        }
+
+        db.prepare(
+          `UPDATE seats SET status = 'booked' WHERE trip_id = ? AND seat_number IN (${placeholders})`
+        ).run(trip_id, ...selected_seats);
+
+        const bookingId = `BK-${Math.floor(10000 + Math.random() * 89999)}`;
+        const computedFare =
+          typeof total_fare === 'number' && Number.isFinite(total_fare) && total_fare >= 0
+            ? total_fare
+            : trip.price * selected_seats.length;
+        const now = new Date().toISOString();
+        const cleanBoarding = (boarding_point || '').trim() || trip.counter_name;
+
+        db.prepare(
+          'INSERT INTO bookings (id, trip_id, user_id, passenger_name, phone, boarding_point, selected_seats, total_fare, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        ).run(
+          bookingId,
+          trip_id,
+          null,
+          passenger_name.trim(),
+          phone.trim(),
+          cleanBoarding,
+          JSON.stringify(selected_seats),
+          computedFare,
+          finalStatus,
+          now
+        );
+
+        return {
+          id: bookingId,
+          trip_id,
+          user_id: null,
+          passenger_name: passenger_name.trim(),
+          phone: phone.trim(),
+          boarding_point: cleanBoarding,
+          selected_seats,
+          total_fare: computedFare,
+          status: finalStatus,
+          created_at: now,
+          trip: {
+            route_from: trip.route_from,
+            route_to: trip.route_to,
+            departure_time: trip.departure_time,
+            bus_type: trip.bus_type,
+            price: trip.price,
+            counter_id: trip.counter_id,
+            counter_name: trip.counter_name,
+          },
+        };
+      })();
+
+      res.status(201).json(created);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'টিকিট কাটা সম্পন্ন করা যায়নি';
+      if (msg === 'TRIP_NOT_FOUND') {
+        res.status(404).json({ error: 'ট্রিপ পাওয়া যায়নি' });
+        return;
+      }
+      if (msg === 'FORBIDDEN_COUNTER') {
+        res.status(403).json({ error: 'আপনি শুধুমাত্র আপনার নিজস্ব কাউন্টারের ট্রিপের টিকেট কাটতে পারবেন' });
+        return;
+      }
+      if (msg === 'INVALID_SEATS') {
+        res.status(400).json({ error: 'নির্বাচিত আসন সঠিক নয়' });
+        return;
+      }
+      if (msg.startsWith('SEATS_UNAVAILABLE:')) {
+        res.status(409).json({ error: `নির্বাচিত আসন ইতিমধ্যে বুক হয়ে গেছে: ${msg.split(':')[1]}` });
+        return;
+      }
+      res.status(400).json({ error: msg });
+    }
+  });
+
   // ===========================================================================
   // SUPER ADMIN ENDPOINTS
   // ===========================================================================

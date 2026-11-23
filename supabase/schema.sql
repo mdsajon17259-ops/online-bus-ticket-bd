@@ -1198,6 +1198,14 @@ begin
     where trip_id = v_booking.trip_id
       and seat_number = any(v_booking.selected_seats);
   elsif p_status <> 'cancelled' and v_booking.status = 'cancelled' then
+    if exists (
+      select 1 from public.seats
+      where trip_id = v_booking.trip_id
+        and seat_number = any(v_booking.selected_seats)
+        and status <> 'available'
+    ) then
+      raise exception 'নির্বাচিত এক বা একাধিক আসন ইতিমধ্যে বুক হয়ে গেছে';
+    end if;
     update public.seats
     set status = 'booked'
     where trip_id = v_booking.trip_id
@@ -1209,6 +1217,114 @@ begin
   where id = p_booking_id;
 
   return jsonb_build_object('id', p_booking_id, 'status', p_status);
+end;
+$$;
+
+-- 20. Counter Operator & Admin: Direct Counter Ticket Issue / Booking (Representatives blocked!)
+create or replace function public.staff_create_booking(
+  p_token text,
+  p_trip_id uuid,
+  p_passenger_name text,
+  p_phone text,
+  p_boarding_point text,
+  p_selected_seats text[],
+  p_status text default 'confirmed',
+  p_total_fare numeric default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_staff public.staff_accounts;
+  v_trip public.trips;
+  v_counter_name text;
+  v_avail_count integer;
+  v_fare numeric;
+  v_booking public.bookings;
+  v_final_status text := coalesce(nullif(trim(p_status), ''), 'confirmed');
+begin
+  v_staff := public._verify_staff_session(p_token);
+  if v_staff.id is null or v_staff.role not in ('super_admin', 'counter_admin') then
+    raise exception 'Forbidden: Read-only or unauthorized account cannot issue counter tickets';
+  end if;
+
+  if v_final_status not in ('pending', 'confirmed') then
+    raise exception 'অবৈধ বুকিং স্ট্যাটাস';
+  end if;
+
+  if coalesce(trim(p_passenger_name), '') = '' or coalesce(trim(p_phone), '') = '' or coalesce(array_length(p_selected_seats, 1), 0) = 0 then
+    raise exception 'যাত্রীর নাম, মোবাইল নম্বর এবং কমপক্ষে একটি আসন প্রয়োজন';
+  end if;
+
+  select * into v_trip from public.trips where id = p_trip_id;
+  if v_trip.id is null then
+    raise exception 'ট্রিপ পাওয়া যায়নি';
+  end if;
+
+  if v_staff.role = 'counter_admin' and v_trip.counter_id <> v_staff.counter_id then
+    raise exception 'আপনি শুধুমাত্র আপনার নিজস্ব কাউন্টারের ট্রিপের টিকেট কাটতে পারবেন';
+  end if;
+
+  select counter_name into v_counter_name from public.counters where id = v_trip.counter_id;
+
+  select count(*) into v_avail_count
+  from public.seats
+  where trip_id = p_trip_id
+    and seat_number = any(p_selected_seats)
+    and status = 'available'
+  for update;
+
+  if v_avail_count <> array_length(p_selected_seats, 1) then
+    raise exception 'নির্বাচিত এক বা একাধিক আসন আর খালি নেই';
+  end if;
+
+  update public.seats
+  set status = 'booked'
+  where trip_id = p_trip_id
+    and seat_number = any(p_selected_seats);
+
+  v_fare := coalesce(p_total_fare, v_trip.price * array_length(p_selected_seats, 1));
+  if v_fare < 0 then
+    raise exception 'ভাড়ার পরিমাণ সঠিক নয়';
+  end if;
+
+  insert into public.bookings (
+    trip_id, user_id, passenger_name, phone, boarding_point, selected_seats, total_fare, status
+  ) values (
+    p_trip_id,
+    null,
+    trim(p_passenger_name),
+    trim(p_phone),
+    coalesce(nullif(trim(p_boarding_point), ''), coalesce(v_counter_name, 'প্রধান কাউন্টার')),
+    p_selected_seats,
+    v_fare,
+    v_final_status
+  )
+  returning * into v_booking;
+
+  return jsonb_build_object(
+    'id', v_booking.id,
+    'trip_id', v_booking.trip_id,
+    'user_id', v_booking.user_id,
+    'passenger_name', v_booking.passenger_name,
+    'phone', v_booking.phone,
+    'boarding_point', v_booking.boarding_point,
+    'selected_seats', v_booking.selected_seats,
+    'total_fare', v_booking.total_fare,
+    'status', v_booking.status,
+    'created_at', v_booking.created_at,
+    'trip', jsonb_build_object(
+      'route_from', v_trip.route_from,
+      'route_to', v_trip.route_to,
+      'departure_time', v_trip.departure_time,
+      'bus_type', v_trip.bus_type,
+      'price', v_trip.price,
+      'counter_id', v_trip.counter_id,
+      'counter_name', coalesce(v_counter_name, 'কাউন্টার')
+    )
+  );
 end;
 $$;
 
