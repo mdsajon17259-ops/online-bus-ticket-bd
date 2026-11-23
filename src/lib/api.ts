@@ -1,5 +1,4 @@
 import {
-  createEphemeralSupabaseClient,
   ensureSupabaseClient,
   isSupabaseConfigured,
   supabase,
@@ -19,29 +18,16 @@ import type {
 } from '../types';
 
 const TOKEN_KEY = 'transit_auth_token';
+const STAFF_TOKEN_KEY = 'desh_travels_staff_token';
 const API_BASE_STORAGE_KEY = 'desh_travels_api_base_url';
 let memoryAuthToken: string | null = null;
+let memoryStaffToken: string | null = null;
 
 export const MASTER_ADMIN_USERNAME = 'Sajonvip';
-const MASTER_ADMIN_PASSWORD = 'Sajon2001M';
-const MASTER_ADMIN_SUPABASE_EMAIL = 'sajonvip@deshtravels.bd';
 
 export function isMasterSuperAdminProfile(profile: Profile | null | undefined): boolean {
   if (!profile || profile.role !== 'super_admin') return false;
-  const idLower = (profile.email || '').trim().toLowerCase();
-  return idLower === MASTER_ADMIN_USERNAME.toLowerCase() || idLower === MASTER_ADMIN_SUPABASE_EMAIL;
-}
-
-function toOperatorAuthEmail(usernameOrEmail: string): string {
-  const clean = usernameOrEmail.trim();
-  if (clean.includes('@')) return clean.toLowerCase();
-  return `${clean.toLowerCase()}@operator.deshtravels.bd`;
-}
-
-function toRepresentativeAuthEmail(usernameOrEmail: string): string {
-  const clean = usernameOrEmail.trim();
-  if (clean.includes('@')) return clean.toLowerCase();
-  return `${clean.toLowerCase()}@rep.deshtravels.bd`;
+  return (profile.email || '').trim() === MASTER_ADMIN_USERNAME;
 }
 
 function toPassengerAuthEmail(phoneOrEmail: string): string {
@@ -54,10 +40,7 @@ function toPassengerAuthEmail(phoneOrEmail: string): string {
 function mapSupabaseProfile(row: Record<string, unknown>): Profile {
   const rawEmail = String(row.email || '');
   const role = row.role as UserRole;
-  const isMaster =
-    role === 'super_admin' ||
-    rawEmail.toLowerCase() === MASTER_ADMIN_SUPABASE_EMAIL ||
-    rawEmail === MASTER_ADMIN_USERNAME;
+  const isMaster = role === 'super_admin' || rawEmail === MASTER_ADMIN_USERNAME;
 
   return {
     id: String(row.id),
@@ -96,6 +79,52 @@ export function setAuthToken(token: string | null): void {
   } catch {
     // Ignore storage errors in restricted WebViews; memoryAuthToken remains active
   }
+}
+
+export function getStaffToken(): string | null {
+  try {
+    return localStorage.getItem(STAFF_TOKEN_KEY) || memoryStaffToken;
+  } catch {
+    return memoryStaffToken;
+  }
+}
+
+export function setStaffToken(token: string | null): void {
+  memoryStaffToken = token;
+  try {
+    if (token) {
+      localStorage.setItem(STAFF_TOKEN_KEY, token);
+    } else {
+      localStorage.removeItem(STAFF_TOKEN_KEY);
+      sessionStorage.removeItem(STAFF_TOKEN_KEY);
+    }
+  } catch {
+    // Ignore storage errors in restricted WebViews; memoryStaffToken remains active
+  }
+}
+
+function requireStaffToken(): string {
+  const token = getStaffToken();
+  if (!token) {
+    throw new Error('আপনার সেশন মেয়াদোত্তীর্ণ হয়েছে বা অনুমোদিত নয়। অনুগ্রহ করে পুনরায় লগইন করুন।');
+  }
+  return token;
+}
+
+function handleSupabaseRpcError(error: unknown, fallback: string): Error {
+  const msg = extractErrorMessage(error, fallback);
+  const lower = msg.toLowerCase();
+  if (
+    lower.includes('could not find the function') ||
+    lower.includes('does not exist') ||
+    lower.includes('pgrst202') ||
+    lower.includes('42883')
+  ) {
+    return new Error(
+      'Supabase ডাটাবেসে কাস্টম অ্যাকাউন্ট টেবিল ও ফাংশন সক্রিয় করতে অনুগ্রহ করে Supabase SQL Editor-এ সর্বশেষ supabase/schema.sql স্ক্রিপ্টটি রান করুন।'
+    );
+  }
+  return new Error(msg);
 }
 
 function getConfiguredApiBase(): string {
@@ -466,6 +495,21 @@ export async function createBooking(payload: {
 export async function fetchMyBookings(): Promise<Booking[]> {
   await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
+    const staffToken = getStaffToken();
+    if (staffToken) {
+      const { data: staffUser } = await supabase.rpc('staff_me', { p_token: staffToken });
+      const staffPhone = (staffUser as { phone?: string } | null)?.phone?.trim();
+      if (staffPhone) {
+        const { data, error } = await supabase
+          .from('bookings')
+          .select('*, trips(route_from, route_to, departure_time, bus_type, price, counter_id, counters(counter_name))')
+          .eq('phone', staffPhone)
+          .order('created_at', { ascending: false });
+        if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
+        return (data || []).map(mapSupabaseBooking);
+      }
+    }
+
     const { data: userData } = await supabase.auth.getUser();
     if (!userData.user) return [];
     const { data: profile } = await supabase
@@ -519,122 +563,55 @@ export async function loginWithIdentifier(
   await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     const cleanId = identifier.trim();
-
-    // 1. Master Super Admin Authentication (Username: Sajonvip / Password: Sajon2001M)
-    if (
-      cleanId === MASTER_ADMIN_USERNAME ||
-      cleanId.toLowerCase() === MASTER_ADMIN_SUPABASE_EMAIL
-    ) {
-      if (cleanId !== MASTER_ADMIN_USERNAME || password !== MASTER_ADMIN_PASSWORD) {
-        throw new Error('Invalid username or password');
-      }
-
-      let authUserId: string | null = null;
-      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-        email: MASTER_ADMIN_SUPABASE_EMAIL,
-        password,
-      });
-
-      if (!signInError && signInData.user) {
-        authUserId = signInData.user.id;
-      } else {
-        // Fallback bootstrap if auth.users row was not yet seeded directly in SQL Editor
-        const { data: signUpData } = await supabase.auth.signUp({
-          email: MASTER_ADMIN_SUPABASE_EMAIL,
-          password,
-          options: {
-            data: {
-              username: MASTER_ADMIN_USERNAME,
-              full_name: 'মাস্টার সুপার অ্যাডমিন',
-            },
-          },
-        });
-        if (signUpData.session && signUpData.user) {
-          authUserId = signUpData.user.id;
-        } else {
-          throw new Error(
-            'Supabase-এ মাস্টার অ্যাডমিন সক্রিয় করতে আপনার Supabase SQL Editor-এ supabase/schema.sql স্ক্রিপ্টটি রান করুন।'
-          );
-        }
-      }
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('*, counters(counter_name)')
-        .eq('id', authUserId)
-        .maybeSingle();
-
-      if (profile) {
-        if (profile.role !== 'super_admin') {
-          await supabase.auth.signOut();
-          throw new Error('Invalid username or password');
-        }
-        return { user: mapSupabaseProfile(profile as Record<string, unknown>) };
-      }
-
-      return {
-        user: {
-          id: authUserId,
-          email: MASTER_ADMIN_USERNAME,
-          full_name: 'মাস্টার সুপার অ্যাডমিন',
-          role: 'super_admin',
-          counter_id: null,
-          counter_name: null,
-        },
-      };
+    if (!cleanId || !password) {
+      throw new Error('ইউজারনেম ও পাসওয়ার্ড দিন');
     }
 
-    // 2. Counter Operator / Counter Representative / Registered Passenger Authentication
-    let authUser = null as { id: string } | null;
+    // 1. Custom Database Verification (Super Admin, Counter Admin, Counter Representative, Admin-created users)
+    const { data: staffData, error: staffErr } = await supabase.rpc('staff_login', {
+      p_username: cleanId,
+      p_password: password,
+    });
 
-    if (cleanId.includes('@')) {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: cleanId,
-        password,
-      });
-      if (error || !data.user) {
-        throw new Error('Invalid username or password');
-      }
-      authUser = data.user;
-    } else {
-      const candidateEmails = [
-        toOperatorAuthEmail(cleanId),
-        toRepresentativeAuthEmail(cleanId),
-        toPassengerAuthEmail(cleanId),
-      ];
-      for (const candidateEmail of candidateEmails) {
-        const attempt = await supabase.auth.signInWithPassword({
-          email: candidateEmail,
-          password,
-        });
-        if (!attempt.error && attempt.data.user) {
-          authUser = attempt.data.user;
-          break;
-        }
-      }
+    if (staffErr) {
+      throw handleSupabaseRpcError(staffErr, 'লগইন যাচাই করা যায়নি');
     }
 
-    if (!authUser) {
+    const staffRes = staffData as { ok?: boolean; token?: string; user?: Profile } | null;
+    if (staffRes?.ok && staffRes.token && staffRes.user) {
+      await supabase.auth.signOut().catch(() => undefined);
+      setStaffToken(staffRes.token);
+      return { user: staffRes.user };
+    }
+
+    // Never fall back to passenger auth for Master Super Admin identifier
+    if (cleanId.toLowerCase() === MASTER_ADMIN_USERNAME.toLowerCase()) {
+      throw new Error('Invalid username or password');
+    }
+
+    // 2. Registered Passenger fallback (Supabase Auth passenger accounts only)
+    const candidateEmail = cleanId.includes('@') ? cleanId : toPassengerAuthEmail(cleanId);
+    const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
+      email: candidateEmail,
+      password,
+    });
+
+    if (authErr || !authData.user) {
       throw new Error('Invalid username or password');
     }
 
     const { data: profile, error: profErr } = await supabase
       .from('profiles')
       .select('*, counters(counter_name)')
-      .eq('id', authUser.id)
+      .eq('id', authData.user.id)
       .single();
 
-    if (profErr || !profile) {
-      await supabase.auth.signOut();
+    if (profErr || !profile || profile.role !== 'user') {
+      await supabase.auth.signOut().catch(() => undefined);
       throw new Error('Invalid username or password');
     }
 
-    // Block any non-Sajonvip credential from entering super_admin
-    if (profile.role === 'super_admin') {
-      await supabase.auth.signOut();
-      throw new Error('Invalid username or password');
-    }
-
+    setStaffToken(null);
     return { user: mapSupabaseProfile(profile as Record<string, unknown>) };
   }
 
@@ -656,6 +633,14 @@ export async function registerPassenger(payload: {
   if (isSupabaseConfigured && supabase) {
     const cleanPhone = payload.phone.trim();
     const digits = cleanPhone.replace(/[\s-]/g, '');
+
+    const { data: available } = await supabase.rpc('is_username_available', {
+      p_username: digits,
+    });
+    if (available === false) {
+      throw new Error('এই মোবাইল নম্বর/ইউজারনেমটি ইতিমধ্যে সিস্টেমে ব্যবহৃত হয়েছে।');
+    }
+
     const emailToUse = payload.email?.trim() || toPassengerAuthEmail(cleanPhone);
 
     const { data, error } = await supabase.auth.signUp({
@@ -681,6 +666,7 @@ export async function registerPassenger(payload: {
       counter_id: null,
     });
 
+    setStaffToken(null);
     return {
       user: {
         id: data.user.id,
@@ -704,6 +690,18 @@ export async function registerPassenger(payload: {
 export async function fetchCurrentUser(): Promise<Profile | null> {
   await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
+    const staffToken = getStaffToken();
+    if (staffToken) {
+      const { data: staffUser, error: staffErr } = await supabase.rpc('staff_me', {
+        p_token: staffToken,
+      });
+      if (!staffErr && staffUser) {
+        return staffUser as Profile;
+      }
+      // Session expired or invalidated (e.g. after Admin password reset)
+      setStaffToken(null);
+    }
+
     const { data } = await supabase.auth.getUser();
     if (!data.user) return null;
     const { data: profile } = await supabase
@@ -712,17 +710,7 @@ export async function fetchCurrentUser(): Promise<Profile | null> {
       .eq('id', data.user.id)
       .maybeSingle();
 
-    if (!profile) {
-      if (data.user.email?.toLowerCase() === MASTER_ADMIN_SUPABASE_EMAIL) {
-        return {
-          id: data.user.id,
-          email: MASTER_ADMIN_USERNAME,
-          full_name: 'মাস্টার সুপার অ্যাডমিন',
-          role: 'super_admin',
-          counter_id: null,
-          counter_name: null,
-        };
-      }
+    if (!profile || profile.role !== 'user') {
       return null;
     }
 
@@ -739,10 +727,19 @@ export async function fetchCurrentUser(): Promise<Profile | null> {
 }
 
 export async function signOutUser(): Promise<void> {
+  const staffToken = getStaffToken();
   setAuthToken(null);
+  setStaffToken(null);
   await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
-    await supabase.auth.signOut();
+    if (staffToken) {
+      try {
+        await supabase.rpc('staff_logout', { p_token: staffToken });
+      } catch {
+        // Ignore logout RPC error
+      }
+    }
+    await supabase.auth.signOut().catch(() => undefined);
   }
 }
 
@@ -788,8 +785,17 @@ export async function createCounterTrip(payload: {
 }): Promise<Trip> {
   await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
-    const { data, error } = await supabase.from('trips').insert(payload).select().single();
-    if (error) throw new Error(extractErrorMessage(error, 'ট্রিপ তৈরি করা যায়নি'));
+    const { data, error } = await supabase.rpc('staff_create_trip', {
+      p_token: requireStaffToken(),
+      p_counter_id: payload.counter_id || null,
+      p_route_from: payload.route_from,
+      p_route_to: payload.route_to,
+      p_departure_time: payload.departure_time,
+      p_bus_type: payload.bus_type,
+      p_price: Number(payload.price),
+      p_total_seats: Number(payload.total_seats),
+    });
+    if (error) throw handleSupabaseRpcError(error, 'ট্রিপ তৈরি করা যায়নি');
     return data as Trip;
   }
   return apiFetch<Trip>('/api/operator/trips', {
@@ -810,19 +816,16 @@ export async function updateCounterTrip(
 ): Promise<Trip> {
   await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
-    const { data, error } = await supabase
-      .from('trips')
-      .update({
-        route_from: payload.route_from.trim(),
-        route_to: payload.route_to.trim(),
-        departure_time: payload.departure_time,
-        bus_type: payload.bus_type.trim(),
-        price: Number(payload.price),
-      })
-      .eq('id', tripId)
-      .select()
-      .single();
-    if (error) throw new Error(extractErrorMessage(error, 'ট্রিপ আপডেট করা যায়নি'));
+    const { data, error } = await supabase.rpc('staff_update_trip', {
+      p_token: requireStaffToken(),
+      p_trip_id: tripId,
+      p_route_from: payload.route_from.trim(),
+      p_route_to: payload.route_to.trim(),
+      p_departure_time: payload.departure_time,
+      p_bus_type: payload.bus_type.trim(),
+      p_price: Number(payload.price),
+    });
+    if (error) throw handleSupabaseRpcError(error, 'ট্রিপ আপডেট করা যায়নি');
     return data as Trip;
   }
   return apiFetch<Trip>(`/api/operator/trips/${encodeURIComponent(tripId)}`, {
@@ -834,8 +837,11 @@ export async function updateCounterTrip(
 export async function deleteCounterTrip(tripId: string): Promise<void> {
   await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
-    const { error } = await supabase.from('trips').delete().eq('id', tripId);
-    if (error) throw new Error(extractErrorMessage(error, 'ট্রিপ মুছে ফেলা যায়নি'));
+    const { error } = await supabase.rpc('staff_delete_trip', {
+      p_token: requireStaffToken(),
+      p_trip_id: tripId,
+    });
+    if (error) throw handleSupabaseRpcError(error, 'ট্রিপ মুছে ফেলা যায়নি');
     return;
   }
   await apiFetch(`/api/operator/trips/${encodeURIComponent(tripId)}`, { method: 'DELETE' });
@@ -848,14 +854,13 @@ export async function toggleCounterSeat(
 ): Promise<Seat> {
   await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
-    const { data, error } = await supabase
-      .from('seats')
-      .update({ status })
-      .eq('trip_id', tripId)
-      .eq('seat_number', seatNumber)
-      .select()
-      .single();
-    if (error) throw new Error(extractErrorMessage(error, 'আসনের অবস্থা পরিবর্তন করা যায়নি'));
+    const { data, error } = await supabase.rpc('staff_toggle_seat', {
+      p_token: requireStaffToken(),
+      p_trip_id: tripId,
+      p_seat_number: seatNumber,
+      p_status: status,
+    });
+    if (error) throw handleSupabaseRpcError(error, 'আসনের অবস্থা পরিবর্তন করা যায়নি');
     return data as Seat;
   }
   return apiFetch<Seat>(
@@ -873,34 +878,13 @@ export async function updateBookingStatus(
 ): Promise<{ id: string; status: BookingStatus }> {
   await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
-    const { data: booking, error: fetchErr } = await supabase
-      .from('bookings')
-      .select('*')
-      .eq('id', bookingId)
-      .single();
-    if (fetchErr || !booking) throw new Error(extractErrorMessage(fetchErr, 'বুকিং পাওয়া যায়নি'));
-
-    const seats = booking.selected_seats as string[];
-    if (status === 'cancelled' && booking.status !== 'cancelled') {
-      await supabase
-        .from('seats')
-        .update({ status: 'available' })
-        .eq('trip_id', booking.trip_id)
-        .in('seat_number', seats);
-    } else if (status !== 'cancelled' && booking.status === 'cancelled') {
-      await supabase
-        .from('seats')
-        .update({ status: 'booked' })
-        .eq('trip_id', booking.trip_id)
-        .in('seat_number', seats);
-    }
-
-    const { error: updErr } = await supabase
-      .from('bookings')
-      .update({ status })
-      .eq('id', bookingId);
-    if (updErr) throw new Error(extractErrorMessage(updErr, 'স্ট্যাটাস আপডেট করা যায়নি'));
-    return { id: bookingId, status };
+    const { data, error } = await supabase.rpc('staff_update_booking_status', {
+      p_token: requireStaffToken(),
+      p_booking_id: bookingId,
+      p_status: status,
+    });
+    if (error) throw handleSupabaseRpcError(error, 'স্ট্যাটাস আপডেট করা যায়নি');
+    return data as { id: string; status: BookingStatus };
   }
 
   return apiFetch<{ id: string; status: BookingStatus }>(
@@ -922,17 +906,12 @@ export async function updateAppSettings(payload: {
 }): Promise<AppSettings> {
   await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
-    const { data, error } = await supabase
-      .from('app_settings')
-      .update({
-        organization_name: payload.organization_name,
-        organization_logo_url: payload.organization_logo_url,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', 1)
-      .select()
-      .single();
-    if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
+    const { data, error } = await supabase.rpc('admin_update_settings', {
+      p_token: requireStaffToken(),
+      p_organization_name: payload.organization_name,
+      p_organization_logo_url: payload.organization_logo_url,
+    });
+    if (error) throw handleSupabaseRpcError(error, 'সেটিংস সংরক্ষণ করা যায়নি');
     return data as AppSettings;
   }
 
@@ -1006,34 +985,11 @@ export async function fetchAdminBookings(): Promise<Booking[]> {
 export async function fetchAdminCounters(): Promise<Counter[]> {
   await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
-    const [countersRes, profilesRes] = await Promise.all([
-      supabase.from('counters').select('*').order('counter_name', { ascending: true }),
-      supabase
-        .from('profiles')
-        .select('id, email, role, counter_id')
-        .in('role', ['counter_admin', 'counter_representative']),
-    ]);
-    if (countersRes.error) {
-      throw new Error(extractErrorMessage(countersRes.error, 'কাউন্টার তালিকা লোড করা যায়নি'));
-    }
-    const profiles = (profilesRes.data || []) as Array<{
-      id: string;
-      email: string;
-      role: string;
-      counter_id: string | null;
-    }>;
-
-    return ((countersRes.data || []) as Counter[]).map((c) => {
-      const op = profiles.find((p) => p.counter_id === c.id && p.role === 'counter_admin');
-      const rep = profiles.find((p) => p.counter_id === c.id && p.role === 'counter_representative');
-      return {
-        ...c,
-        operator_username: op?.email ?? null,
-        operator_user_id: op?.id ?? null,
-        representative_username: rep?.email ?? null,
-        representative_user_id: rep?.id ?? null,
-      };
+    const { data, error } = await supabase.rpc('admin_list_counters', {
+      p_token: requireStaffToken(),
     });
+    if (error) throw handleSupabaseRpcError(error, 'কাউন্টার তালিকা লোড করা যায়নি');
+    return (data || []) as Counter[];
   }
   return apiFetch<Counter[]>('/api/admin/counters');
 }
@@ -1069,107 +1025,19 @@ export async function createCounter(payload: {
       throw new Error('এই ইউজারনেমটি মাস্টার সুপার অ্যাডমিনের জন্য সংরক্ষিত');
     }
 
-    // System-wide uniqueness check across all existing profiles
-    const { data: existingProfiles } = await supabase
-      .from('profiles')
-      .select('email');
-    const usedSet = new Set(
-      (existingProfiles || []).map((p) => String(p.email || '').trim().toLowerCase())
-    );
-    if (usedSet.has(cleanOpUsername.toLowerCase())) {
-      throw new Error(`ইউজারনেম "${cleanOpUsername}" ইতিমধ্যে সিস্টেমে ব্যবহৃত হয়েছে। অন্য ইউজারনেম দিন।`);
-    }
-    if (usedSet.has(cleanRepUsername.toLowerCase())) {
-      throw new Error(`প্রতিনিধি ইউজারনেম "${cleanRepUsername}" ইতিমধ্যে সিস্টেমে ব্যবহৃত হয়েছে। অন্য ইউজারনেম দিন।`);
-    }
-
-    const { data, error } = await supabase
-      .from('counters')
-      .insert({
-        counter_name: payload.counter_name.trim(),
-        phone: payload.phone.trim(),
-        address: payload.address.trim(),
-        logo_url: payload.logo_url.trim(),
-      })
-      .select()
-      .single();
-    if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
-    const createdCounter = data as Counter;
-
-    const ephemeral = createEphemeralSupabaseClient();
-    if (!ephemeral) throw new Error('Supabase Auth ক্লায়েন্ট প্রস্তুত নয়');
-
-    const { data: opAuth, error: opAuthErr } = await ephemeral.auth.signUp({
-      email: toOperatorAuthEmail(cleanOpUsername),
-      password: payload.operator_password,
-      options: {
-        data: {
-          username: cleanOpUsername,
-          full_name: `${payload.counter_name.trim()} কাউন্টার`,
-          phone: payload.phone.trim(),
-          role: 'counter_admin',
-        },
-      },
+    const { data, error } = await supabase.rpc('admin_create_counter', {
+      p_token: requireStaffToken(),
+      p_counter_name: payload.counter_name.trim(),
+      p_phone: payload.phone.trim(),
+      p_address: payload.address.trim(),
+      p_logo_url: payload.logo_url.trim(),
+      p_operator_username: cleanOpUsername,
+      p_operator_password: payload.operator_password,
+      p_representative_username: cleanRepUsername,
+      p_representative_password: payload.representative_password,
     });
-
-    if (opAuthErr || !opAuth.user) {
-      await supabase.from('counters').delete().eq('id', createdCounter.id);
-      throw new Error(extractErrorMessage(opAuthErr, 'কাউন্টার অ্যাকাউন্ট তৈরি করা যায়নি'));
-    }
-
-    const { error: opProfErr } = await supabase.from('profiles').insert({
-      id: opAuth.user.id,
-      email: cleanOpUsername,
-      full_name: `${payload.counter_name.trim()} কাউন্টার`,
-      phone: payload.phone.trim(),
-      role: 'counter_admin',
-      counter_id: createdCounter.id,
-    });
-    if (opProfErr) {
-      await supabase.from('counters').delete().eq('id', createdCounter.id);
-      throw new Error(extractErrorMessage(opProfErr, 'কাউন্টার প্রোফাইল সংরক্ষণ করা যায়নি'));
-    }
-
-    const { data: repAuth, error: repAuthErr } = await ephemeral.auth.signUp({
-      email: toRepresentativeAuthEmail(cleanRepUsername),
-      password: payload.representative_password,
-      options: {
-        data: {
-          username: cleanRepUsername,
-          full_name: `${payload.counter_name.trim()} প্রতিনিধি`,
-          phone: payload.phone.trim(),
-          role: 'counter_representative',
-        },
-      },
-    });
-
-    if (repAuthErr || !repAuth.user) {
-      await supabase.from('profiles').delete().eq('id', opAuth.user.id);
-      await supabase.from('counters').delete().eq('id', createdCounter.id);
-      throw new Error(extractErrorMessage(repAuthErr, 'কাউন্টার প্রতিনিধি অ্যাকাউন্ট তৈরি করা যায়নি'));
-    }
-
-    const { error: repProfErr } = await supabase.from('profiles').insert({
-      id: repAuth.user.id,
-      email: cleanRepUsername,
-      full_name: `${payload.counter_name.trim()} প্রতিনিধি`,
-      phone: payload.phone.trim(),
-      role: 'counter_representative',
-      counter_id: createdCounter.id,
-    });
-    if (repProfErr) {
-      await supabase.from('profiles').delete().eq('id', opAuth.user.id);
-      await supabase.from('counters').delete().eq('id', createdCounter.id);
-      throw new Error(extractErrorMessage(repProfErr, 'প্রতিনিধি প্রোফাইল সংরক্ষণ করা যায়নি'));
-    }
-
-    return {
-      ...createdCounter,
-      operator_username: cleanOpUsername,
-      operator_user_id: opAuth.user.id,
-      representative_username: cleanRepUsername,
-      representative_user_id: repAuth.user.id,
-    };
+    if (error) throw handleSupabaseRpcError(error, 'কাউন্টার তৈরি করা যায়নি');
+    return data as Counter;
   }
 
   return apiFetch<Counter>('/api/admin/counters', {
@@ -1189,14 +1057,13 @@ export async function resetCounterAccountPassword(payload: {
   await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     const { data, error } = await supabase.rpc('admin_reset_account_password', {
+      p_token: requireStaffToken(),
       p_counter_id: payload.counter_id,
       p_target_role: payload.target_role,
       p_new_password: payload.new_password,
     });
     if (error) {
-      throw new Error(
-        extractErrorMessage(error, 'পাসওয়ার্ড রিসেট করা যায়নি (Supabase-এ schema.sql আপডেট করুন)')
-      );
+      throw handleSupabaseRpcError(error, 'পাসওয়ার্ড রিসেট করা যায়নি');
     }
     return data as PasswordResetLog;
   }
@@ -1216,11 +1083,9 @@ export async function resetCounterAccountPassword(payload: {
 export async function fetchPasswordResetLogs(): Promise<PasswordResetLog[]> {
   await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
-    const { data, error } = await supabase
-      .from('password_reset_logs')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(100);
+    const { data, error } = await supabase.rpc('admin_get_password_reset_logs', {
+      p_token: requireStaffToken(),
+    });
     if (error) return [];
     return (data || []) as PasswordResetLog[];
   }
@@ -1230,13 +1095,11 @@ export async function fetchPasswordResetLogs(): Promise<PasswordResetLog[]> {
 export async function deleteCounter(id: string): Promise<void> {
   await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
-    await supabase
-      .from('profiles')
-      .delete()
-      .eq('counter_id', id)
-      .in('role', ['counter_admin', 'counter_representative']);
-    const { error } = await supabase.from('counters').delete().eq('id', id);
-    if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
+    const { error } = await supabase.rpc('admin_delete_counter', {
+      p_token: requireStaffToken(),
+      p_counter_id: id,
+    });
+    if (error) throw handleSupabaseRpcError(error, 'কাউন্টার মুছে ফেলা যায়নি');
     return;
   }
   await apiFetch(`/api/admin/counters/${encodeURIComponent(id)}`, { method: 'DELETE' });
@@ -1253,8 +1116,17 @@ export async function createTrip(payload: {
 }): Promise<Trip> {
   await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
-    const { data, error } = await supabase.from('trips').insert(payload).select().single();
-    if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
+    const { data, error } = await supabase.rpc('staff_create_trip', {
+      p_token: requireStaffToken(),
+      p_counter_id: payload.counter_id,
+      p_route_from: payload.route_from,
+      p_route_to: payload.route_to,
+      p_departure_time: payload.departure_time,
+      p_bus_type: payload.bus_type,
+      p_price: Number(payload.price),
+      p_total_seats: Number(payload.total_seats),
+    });
+    if (error) throw handleSupabaseRpcError(error, 'ট্রিপ তৈরি করা যায়নি');
     return data as Trip;
   }
   return apiFetch<Trip>('/api/admin/trips', {
@@ -1266,8 +1138,11 @@ export async function createTrip(payload: {
 export async function deleteTrip(id: string): Promise<void> {
   await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
-    const { error } = await supabase.from('trips').delete().eq('id', id);
-    if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
+    const { error } = await supabase.rpc('staff_delete_trip', {
+      p_token: requireStaffToken(),
+      p_trip_id: id,
+    });
+    if (error) throw handleSupabaseRpcError(error, 'ট্রিপ মুছে ফেলা যায়নি');
     return;
   }
   await apiFetch(`/api/admin/trips/${encodeURIComponent(id)}`, { method: 'DELETE' });
@@ -1276,13 +1151,11 @@ export async function deleteTrip(id: string): Promise<void> {
 export async function fetchAllUsers(): Promise<Profile[]> {
   await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*, counters(counter_name)')
-      .neq('role', 'super_admin')
-      .order('created_at', { ascending: false });
-    if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
-    return (data || []).map((p) => mapSupabaseProfile(p as Record<string, unknown>));
+    const { data, error } = await supabase.rpc('admin_list_users', {
+      p_token: requireStaffToken(),
+    });
+    if (error) throw handleSupabaseRpcError(error, 'ব্যবহারকারী তালিকা লোড করা যায়নি');
+    return (data || []) as Profile[];
   }
   return apiFetch<Profile[]>('/api/admin/users');
 }
@@ -1308,58 +1181,20 @@ export async function createAdminUser(payload: {
       throw new Error('পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে');
     }
 
-    const { data: existingProfiles } = await supabase
-      .from('profiles')
-      .select('email');
-    if (
-      (existingProfiles || []).some(
-        (p) => String(p.email || '').trim().toLowerCase() === cleanUsername.toLowerCase()
-      )
-    ) {
-      throw new Error('এই ইউজারনেমটি ইতিমধ্যে ব্যবহৃত হয়েছে');
-    }
-
-    const ephemeral = createEphemeralSupabaseClient();
-    if (!ephemeral) throw new Error('Supabase Auth ক্লায়েন্ট প্রস্তুত নয়');
-
-    const authEmail =
-      payload.role === 'counter_admin'
-        ? toOperatorAuthEmail(cleanUsername)
-        : payload.role === 'counter_representative'
-          ? toRepresentativeAuthEmail(cleanUsername)
-          : toPassengerAuthEmail(cleanUsername);
-
-    const { data, error } = await ephemeral.auth.signUp({
-      email: authEmail,
-      password: payload.password,
-      options: {
-        data: {
-          username: cleanUsername,
-          full_name: payload.full_name.trim(),
-          phone: (payload.phone || '').trim(),
-          role: payload.role,
-        },
-      },
-    });
-    if (error || !data.user) throw new Error(extractErrorMessage(error, 'ব্যবহারকারী তৈরি করা যায়নি'));
-
     const isCounterRole =
       payload.role === 'counter_admin' || payload.role === 'counter_representative';
 
-    const { data: profile, error: profErr } = await supabase
-      .from('profiles')
-      .upsert({
-        id: data.user.id,
-        email: cleanUsername,
-        full_name: payload.full_name.trim(),
-        phone: (payload.phone || '').trim(),
-        role: payload.role,
-        counter_id: isCounterRole ? payload.counter_id : null,
-      })
-      .select('*, counters(counter_name)')
-      .single();
-    if (profErr) throw new Error(extractErrorMessage(profErr, 'ব্যবহারকারীর প্রোফাইল তৈরি করা যায়নি'));
-    return mapSupabaseProfile(profile as Record<string, unknown>);
+    const { data, error } = await supabase.rpc('admin_create_staff_account', {
+      p_token: requireStaffToken(),
+      p_username: cleanUsername,
+      p_full_name: payload.full_name.trim(),
+      p_phone: (payload.phone || '').trim(),
+      p_password: payload.password,
+      p_role: payload.role,
+      p_counter_id: isCounterRole ? payload.counter_id : null,
+    });
+    if (error) throw handleSupabaseRpcError(error, 'ব্যবহারকারী তৈরি করা যায়নি');
+    return data as Profile;
   }
   return apiFetch<Profile>('/api/admin/users', {
     method: 'POST',
@@ -1379,18 +1214,14 @@ export async function updateUserRole(
       throw new Error('শুধুমাত্র যাত্রী, কাউন্টার অথবা প্রতিনিধি রোল নির্ধারণ করা যাবে');
     }
     const isCounterRole = role === 'counter_admin' || role === 'counter_representative';
-    const { data, error } = await supabase
-      .from('profiles')
-      .update({
-        role,
-        counter_id: isCounterRole ? counter_id : null,
-      })
-      .eq('id', id)
-      .neq('role', 'super_admin')
-      .select('*, counters(counter_name)')
-      .single();
-    if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
-    return mapSupabaseProfile(data as Record<string, unknown>);
+    const { data, error } = await supabase.rpc('admin_update_staff_role', {
+      p_token: requireStaffToken(),
+      p_staff_id: id,
+      p_role: role,
+      p_counter_id: isCounterRole ? counter_id : null,
+    });
+    if (error) throw handleSupabaseRpcError(error, 'রোল পরিবর্তন করা যায়নি');
+    return data as Profile;
   }
   return apiFetch<Profile>(`/api/admin/users/${encodeURIComponent(id)}`, {
     method: 'PATCH',
@@ -1401,12 +1232,11 @@ export async function updateUserRole(
 export async function deleteAdminUser(id: string): Promise<void> {
   await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
-    const { error } = await supabase
-      .from('profiles')
-      .delete()
-      .eq('id', id)
-      .neq('role', 'super_admin');
-    if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
+    const { error } = await supabase.rpc('admin_delete_staff_account', {
+      p_token: requireStaffToken(),
+      p_staff_id: id,
+    });
+    if (error) throw handleSupabaseRpcError(error, 'অ্যাকাউন্ট মুছে ফেলা যায়নি');
     return;
   }
   await apiFetch(`/api/admin/users/${encodeURIComponent(id)}`, { method: 'DELETE' });

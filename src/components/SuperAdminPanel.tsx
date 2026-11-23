@@ -588,8 +588,13 @@ export function SuperAdminPanel() {
                                 <button
                                   type="button"
                                   onClick={async () => {
-                                    await updateBookingStatus(b.id, 'confirmed');
-                                    await loadAdminData();
+                                    setError('');
+                                    try {
+                                      await updateBookingStatus(b.id, 'confirmed');
+                                      await loadAdminData();
+                                    } catch (err) {
+                                      setError(extractErrorMessage(err, 'বুকিং নিশ্চিত করা যায়নি'));
+                                    }
                                   }}
                                   className="min-h-[34px] px-2.5 py-1 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-md"
                                 >
@@ -600,8 +605,13 @@ export function SuperAdminPanel() {
                                 <button
                                   type="button"
                                   onClick={async () => {
-                                    await updateBookingStatus(b.id, 'cancelled');
-                                    await loadAdminData();
+                                    setError('');
+                                    try {
+                                      await updateBookingStatus(b.id, 'cancelled');
+                                      await loadAdminData();
+                                    } catch (err) {
+                                      setError(extractErrorMessage(err, 'বুকিং বাতিল করা যায়নি'));
+                                    }
                                   }}
                                   className="min-h-[34px] px-2.5 py-1 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-md"
                                 >
@@ -1055,8 +1065,13 @@ export function SuperAdminPanel() {
                               <button
                                 type="button"
                                 onClick={async () => {
-                                  await deleteCounter(c.id);
-                                  await loadAdminData();
+                                  setError('');
+                                  try {
+                                    await deleteCounter(c.id);
+                                    await loadAdminData();
+                                  } catch (err) {
+                                    setError(extractErrorMessage(err, 'কাউন্টার মুছে ফেলা যায়নি'));
+                                  }
                                 }}
                                 aria-label={`${c.counter_name} মুছুন`}
                                 className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
@@ -1169,8 +1184,13 @@ export function SuperAdminPanel() {
                               <button
                                 type="button"
                                 onClick={async () => {
-                                  await deleteTrip(t.id);
-                                  await loadAdminData();
+                                  setError('');
+                                  try {
+                                    await deleteTrip(t.id);
+                                    await loadAdminData();
+                                  } catch (err) {
+                                    setError(extractErrorMessage(err, 'ট্রিপ মুছে ফেলা যায়নি'));
+                                  }
                                 }}
                                 aria-label={`${t.route_from} থেকে ${t.route_to} ট্রিপ মুছুন`}
                                 className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
@@ -1344,8 +1364,13 @@ export function SuperAdminPanel() {
                               <button
                                 type="button"
                                 onClick={async () => {
-                                  await deleteAdminUser(u.id);
-                                  await loadAdminData();
+                                  setError('');
+                                  try {
+                                    await deleteAdminUser(u.id);
+                                    await loadAdminData();
+                                  } catch (err) {
+                                    setError(extractErrorMessage(err, 'অ্যাকাউন্ট মুছে ফেলা যায়নি'));
+                                  }
                                 }}
                                 aria-label={`${u.email} মুছুন`}
                                 className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"

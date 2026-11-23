@@ -12,8 +12,6 @@ type VercelResponse = ServerResponse & {
 };
 
 const MASTER_ADMIN_USERNAME = 'Sajonvip';
-const MASTER_ADMIN_PASSWORD = 'Sajon2001M';
-const MASTER_ADMIN_SUPABASE_EMAIL = 'sajonvip@deshtravels.bd';
 
 function getSupabaseEnv(): { supabaseUrl: string; supabaseAnonKey: string } {
   const supabaseUrl = (
@@ -119,18 +117,6 @@ function extractRoutePath(req: VercelRequest): { routePath: string; searchParams
   return { routePath: pathName, searchParams: parsed.searchParams };
 }
 
-function toOperatorAuthEmail(usernameOrEmail: string): string {
-  const clean = usernameOrEmail.trim();
-  if (clean.includes('@')) return clean.toLowerCase();
-  return `${clean.toLowerCase()}@operator.deshtravels.bd`;
-}
-
-function toRepresentativeAuthEmail(usernameOrEmail: string): string {
-  const clean = usernameOrEmail.trim();
-  if (clean.includes('@')) return clean.toLowerCase();
-  return `${clean.toLowerCase()}@rep.deshtravels.bd`;
-}
-
 function toPassengerAuthEmail(phoneOrEmail: string): string {
   const clean = phoneOrEmail.trim();
   if (clean.includes('@')) return clean.toLowerCase();
@@ -141,10 +127,7 @@ function toPassengerAuthEmail(phoneOrEmail: string): string {
 function mapSupabaseProfile(row: Record<string, unknown>) {
   const rawEmail = String(row.email || '');
   const role = String(row.role || 'user');
-  const isMaster =
-    role === 'super_admin' ||
-    rawEmail.toLowerCase() === MASTER_ADMIN_SUPABASE_EMAIL ||
-    rawEmail === MASTER_ADMIN_USERNAME;
+  const isMaster = role === 'super_admin' || rawEmail === MASTER_ADMIN_USERNAME;
 
   return {
     id: String(row.id),
@@ -263,139 +246,65 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         return;
       }
 
-      // Master Super Admin check
-      if (
-        cleanId === MASTER_ADMIN_USERNAME ||
-        cleanId.toLowerCase() === MASTER_ADMIN_SUPABASE_EMAIL
-      ) {
-        if (cleanId !== MASTER_ADMIN_USERNAME || password !== MASTER_ADMIN_PASSWORD) {
-          sendJson(res, 401, { error: 'Invalid username or password' });
-          return;
-        }
+      // 1. Custom staff_accounts login (Super Admin, Counter Admin, Counter Representative, Admin-created users)
+      const { data: staffData, error: staffErr } = await supabase.rpc('staff_login', {
+        p_username: cleanId,
+        p_password: password,
+      });
 
-        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-          email: MASTER_ADMIN_SUPABASE_EMAIL,
-          password,
-        });
-
-        let sessionToken = signInData.session?.access_token || '';
-        let authUserId = signInData.user?.id || '';
-
-        if (signInError || !authUserId) {
-          const { data: signUpData } = await supabase.auth.signUp({
-            email: MASTER_ADMIN_SUPABASE_EMAIL,
-            password,
-            options: {
-              data: {
-                username: MASTER_ADMIN_USERNAME,
-                full_name: 'মাস্টার সুপার অ্যাডমিন',
-              },
-            },
-          });
-          if (signUpData.session && signUpData.user) {
-            sessionToken = signUpData.session.access_token;
-            authUserId = signUpData.user.id;
-          } else {
-            sendJson(res, 401, {
-              error:
-                'Supabase-এ মাস্টার অ্যাডমিন সক্রিয় করতে আপনার Supabase SQL Editor-এ supabase/schema.sql স্ক্রিপ্টটি রান করুন।',
-            });
-            return;
-          }
-        }
-
-        const authedClient = createClient(supabaseUrl, supabaseAnonKey, {
-          global: { headers: { Authorization: `Bearer ${sessionToken}` } },
-          auth: { persistSession: false },
-        });
-
-        const { data: profile } = await authedClient
-          .from('profiles')
-          .select('*, counters(counter_name)')
-          .eq('id', authUserId)
-          .maybeSingle();
-
-        if (profile && profile.role !== 'super_admin') {
-          sendJson(res, 403, { error: 'মাস্টার সুপার অ্যাডমিন রোল নিশ্চিত করা যায়নি' });
-          return;
-        }
-
-        sendJson(res, 200, {
-          token: sessionToken,
-          user: profile
-            ? mapSupabaseProfile(profile as Record<string, unknown>)
-            : {
-                id: authUserId,
-                email: MASTER_ADMIN_USERNAME,
-                full_name: 'মাস্টার সুপার অ্যাডমিন',
-                role: 'super_admin',
-                counter_id: null,
-                counter_name: null,
-              },
+      if (staffErr) {
+        sendJson(res, 500, {
+          error:
+            staffErr.message ||
+            'Supabase SQL Editor-এ সর্বশেষ supabase/schema.sql স্ক্রিপ্টটি রান করুন।',
         });
         return;
       }
 
-      // Counter operator, Representative, or Passenger login
-      let authUserId = '';
-      let sessionToken = '';
-
-      if (cleanId.includes('@')) {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email: cleanId,
-          password,
+      const staffRes = staffData as { ok?: boolean; token?: string; user?: unknown } | null;
+      if (staffRes?.ok && staffRes.token && staffRes.user) {
+        sendJson(res, 200, {
+          token: staffRes.token,
+          user: staffRes.user,
         });
-        if (!error && data.user && data.session) {
-          authUserId = data.user.id;
-          sessionToken = data.session.access_token;
-        }
-      } else {
-        const candidateEmails = [
-          toOperatorAuthEmail(cleanId),
-          toRepresentativeAuthEmail(cleanId),
-          toPassengerAuthEmail(cleanId),
-        ];
-        for (const candidateEmail of candidateEmails) {
-          const attempt = await supabase.auth.signInWithPassword({
-            email: candidateEmail,
-            password,
-          });
-          if (!attempt.error && attempt.data.user && attempt.data.session) {
-            authUserId = attempt.data.user.id;
-            sessionToken = attempt.data.session.access_token;
-            break;
-          }
-        }
+        return;
       }
 
-      if (!authUserId || !sessionToken) {
+      if (cleanId.toLowerCase() === MASTER_ADMIN_USERNAME.toLowerCase()) {
+        sendJson(res, 401, { error: 'Invalid username or password' });
+        return;
+      }
+
+      // 2. Registered Passenger fallback (Supabase Auth passenger accounts only)
+      const candidateEmail = cleanId.includes('@') ? cleanId : toPassengerAuthEmail(cleanId);
+      const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
+        email: candidateEmail,
+        password,
+      });
+
+      if (authErr || !authData.user || !authData.session) {
         sendJson(res, 401, { error: 'Invalid username or password' });
         return;
       }
 
       const authedClient = createClient(supabaseUrl, supabaseAnonKey, {
-        global: { headers: { Authorization: `Bearer ${sessionToken}` } },
+        global: { headers: { Authorization: `Bearer ${authData.session.access_token}` } },
         auth: { persistSession: false },
       });
 
       const { data: profile, error: profErr } = await authedClient
         .from('profiles')
         .select('*, counters(counter_name)')
-        .eq('id', authUserId)
+        .eq('id', authData.user.id)
         .single();
 
-      if (profErr || !profile) {
-        sendJson(res, 401, { error: 'Invalid username or password' });
-        return;
-      }
-
-      if (profile.role === 'super_admin') {
+      if (profErr || !profile || profile.role !== 'user') {
         sendJson(res, 401, { error: 'Invalid username or password' });
         return;
       }
 
       sendJson(res, 200, {
-        token: sessionToken,
+        token: authData.session.access_token,
         user: mapSupabaseProfile(profile as Record<string, unknown>),
       });
       return;
@@ -480,6 +389,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         return;
       }
 
+      // 1. Check custom staff_sessions token first
+      const { data: staffUser, error: staffErr } = await supabase.rpc('staff_me', {
+        p_token: token,
+      });
+      if (!staffErr && staffUser) {
+        sendJson(res, 200, staffUser);
+        return;
+      }
+
+      // 2. Fallback to passenger Supabase Auth JWT
       const { data: userData, error: userErr } = await supabase.auth.getUser(token);
       if (userErr || !userData.user) {
         sendJson(res, 401, { error: 'সেশন মেয়াদোত্তীর্ণ হয়েছে, আবার লগইন করুন' });
@@ -497,19 +416,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         .eq('id', userData.user.id)
         .maybeSingle();
 
-      if (!profile) {
-        if (userData.user.email?.toLowerCase() === MASTER_ADMIN_SUPABASE_EMAIL) {
-          sendJson(res, 200, {
-            id: userData.user.id,
-            email: MASTER_ADMIN_USERNAME,
-            full_name: 'মাস্টার সুপার অ্যাডমিন',
-            role: 'super_admin',
-            counter_id: null,
-            counter_name: null,
-          });
-          return;
-        }
-        sendJson(res, 404, { error: 'প্রোফাইল পাওয়া যায়নি' });
+      if (!profile || profile.role !== 'user') {
+        sendJson(res, 401, { error: 'সেশন মেয়াদোত্তীর্ণ হয়েছে, আবার লগইন করুন' });
         return;
       }
 
