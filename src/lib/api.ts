@@ -382,7 +382,7 @@ export async function fetchCounters(): Promise<Counter[]> {
     const { data, error } = await supabase
       .from('counters')
       .select('*')
-      .order('counter_name', { ascending: true });
+      .order('created_at', { ascending: true });
     if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
     return (data || []) as Counter[];
   }

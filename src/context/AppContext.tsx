@@ -10,6 +10,7 @@ import {
 import type { AppSettings, Profile } from '../types';
 
 export type ActivePanel = 'passenger' | 'bookings' | 'operator' | 'representative' | 'admin' | 'auth';
+export type PassengerView = 'home' | 'bus' | 'train';
 
 interface AppContextValue {
   settings: AppSettings;
@@ -20,6 +21,8 @@ interface AppContextValue {
   authLoading: boolean;
   activePanel: ActivePanel;
   setActivePanel: (panel: ActivePanel) => void;
+  passengerView: PassengerView;
+  setPassengerView: (view: PassengerView) => void;
   login: (identifier: string, password: string) => Promise<Profile>;
   register: (payload: {
     full_name: string;
@@ -45,6 +48,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<Profile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [activePanel, setActivePanel] = useState<ActivePanel>('passenger');
+  const [passengerView, setPassengerView] = useState<PassengerView>('home');
 
   const refreshSettings = useCallback(async () => {
     try {
@@ -96,6 +100,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await signOutUser();
     setUser(null);
     setActivePanel('passenger');
+    setPassengerView('home');
   }, []);
 
   return (
@@ -109,6 +114,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         authLoading,
         activePanel,
         setActivePanel,
+        passengerView,
+        setPassengerView,
         login,
         register,
         logout,

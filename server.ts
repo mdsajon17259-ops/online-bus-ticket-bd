@@ -645,7 +645,9 @@ async function startServer() {
   });
 
   app.get('/api/counters', (_req, res) => {
-    const counters = db.prepare('SELECT * FROM counters ORDER BY counter_name ASC').all();
+    const counters = db
+      .prepare('SELECT * FROM counters ORDER BY created_at ASC, rowid ASC')
+      .all();
     res.json(counters);
   });
 

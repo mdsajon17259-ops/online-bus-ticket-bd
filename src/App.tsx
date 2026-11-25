@@ -9,7 +9,7 @@ import { AuthScreen } from './components/AuthScreen';
 import { formatBanglaNumber } from './lib/format';
 
 function AppShell() {
-  const { activePanel, setActivePanel, settings, user } = useApp();
+  const { activePanel, setActivePanel, setPassengerView, settings, user } = useApp();
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
@@ -32,7 +32,10 @@ function AppShell() {
           <div className="flex flex-wrap items-center gap-5">
             <button
               type="button"
-              onClick={() => setActivePanel('passenger')}
+              onClick={() => {
+                setPassengerView('home');
+                setActivePanel('passenger');
+              }}
               className="hover:text-slate-900 transition-colors"
             >
               টিকেট বুকিং
