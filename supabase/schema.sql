@@ -233,7 +233,7 @@ after insert on auth.users
 for each row
 execute function public.handle_new_auth_user();
 
--- Atomic passenger booking submission
+-- Atomic passenger booking submission (supports direct guest booking without login)
 create or replace function public.submit_booking(
   p_trip_id uuid,
   p_passenger_name text,
@@ -244,12 +244,17 @@ create or replace function public.submit_booking(
 returns public.bookings
 language plpgsql
 security definer
+set search_path = public
 as $$
 declare
   v_price numeric;
   v_avail_count integer;
   v_booking public.bookings;
 begin
+  if coalesce(trim(p_passenger_name), '') = '' or coalesce(trim(p_phone), '') = '' or coalesce(array_length(p_selected_seats, 1), 0) = 0 then
+    raise exception 'যাত্রীর নাম, মোবাইল নম্বর এবং কমপক্ষে একটি আসন প্রয়োজন';
+  end if;
+
   select price into v_price from public.trips where id = p_trip_id;
   if v_price is null then
     raise exception 'Trip not found';
@@ -263,7 +268,7 @@ begin
   for update;
 
   if v_avail_count <> array_length(p_selected_seats, 1) then
-    raise exception 'One or more selected seats are no longer available';
+    raise exception 'নির্বাচিত এক বা একাধিক আসন আর খালি নেই';
   end if;
 
   update public.seats
@@ -274,7 +279,7 @@ begin
   insert into public.bookings (
     trip_id, user_id, passenger_name, phone, boarding_point, selected_seats, total_fare, status
   ) values (
-    p_trip_id, auth.uid(), p_passenger_name, p_phone, p_boarding_point, p_selected_seats,
+    p_trip_id, auth.uid(), trim(p_passenger_name), trim(p_phone), coalesce(trim(p_boarding_point), ''), p_selected_seats,
     v_price * array_length(p_selected_seats, 1), 'pending'
   )
   returning * into v_booking;
@@ -282,6 +287,8 @@ begin
   return v_booking;
 end;
 $$;
+
+grant execute on function public.submit_booking(uuid, text, text, text, text[]) to anon, authenticated;
 
 -- =============================================================================
 -- CUSTOM DATABASE AUTHENTICATION & RBAC RPCs (Zero Email / Zero SignUp)

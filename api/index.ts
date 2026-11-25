@@ -270,115 +270,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         return;
       }
 
-      if (cleanId.toLowerCase() === MASTER_ADMIN_USERNAME.toLowerCase()) {
-        sendJson(res, 401, { error: 'Invalid username or password' });
-        return;
-      }
-
-      // 2. Registered Passenger fallback (Supabase Auth passenger accounts only)
-      const candidateEmail = cleanId.includes('@') ? cleanId : toPassengerAuthEmail(cleanId);
-      const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
-        email: candidateEmail,
-        password,
-      });
-
-      if (authErr || !authData.user || !authData.session) {
-        sendJson(res, 401, { error: 'Invalid username or password' });
-        return;
-      }
-
-      const authedClient = createClient(supabaseUrl, supabaseAnonKey, {
-        global: { headers: { Authorization: `Bearer ${authData.session.access_token}` } },
-        auth: { persistSession: false },
-      });
-
-      const { data: profile, error: profErr } = await authedClient
-        .from('profiles')
-        .select('*, counters(counter_name)')
-        .eq('id', authData.user.id)
-        .single();
-
-      if (profErr || !profile || profile.role !== 'user') {
-        sendJson(res, 401, { error: 'Invalid username or password' });
-        return;
-      }
-
-      sendJson(res, 200, {
-        token: authData.session.access_token,
-        user: mapSupabaseProfile(profile as Record<string, unknown>),
-      });
+      sendJson(res, 401, { error: 'Invalid username or password' });
       return;
     }
 
-    // 4. Authentication: Register Passenger
+    // 4. Passenger Registration Disabled (Direct Guest Booking Enabled)
     if (method === 'POST' && (routePath === '/auth/register' || routePath === '/register')) {
-      const body = await readJsonBody(req);
-      const fullName = String(body.full_name || '').trim();
-      const phone = String(body.phone || '').trim();
-      const password = typeof body.password === 'string' ? body.password : '';
-      const email = typeof body.email === 'string' ? body.email.trim() : '';
-
-      if (!fullName || !phone || password.length < 4) {
-        sendJson(res, 400, {
-          error: 'পূর্ণ নাম, মোবাইল নম্বর এবং কমপক্ষে ৪ অক্ষরের পাসওয়ার্ড দিন',
-        });
-        return;
-      }
-
-      const digits = phone.replace(/[\s-]/g, '');
-      const emailToUse = email || toPassengerAuthEmail(phone);
-
-      const { data, error } = await supabase.auth.signUp({
-        email: emailToUse,
-        password,
-        options: {
-          data: {
-            username: digits,
-            full_name: fullName,
-            phone,
-            role: 'user',
-          },
-        },
-      });
-
-      if (error || !data.user) {
-        sendJson(res, 400, { error: error?.message || 'নিবন্ধন সম্পন্ন হয়নি' });
-        return;
-      }
-
-      const token = data.session?.access_token || '';
-      const dbClient = token
-        ? createClient(supabaseUrl, supabaseAnonKey, {
-            global: { headers: { Authorization: `Bearer ${token}` } },
-            auth: { persistSession: false },
-          })
-        : supabase;
-
-      await dbClient.from('profiles').upsert({
-        id: data.user.id,
-        email: digits,
-        full_name: fullName,
-        phone,
-        role: 'user',
-        counter_id: null,
-      });
-
-      sendJson(res, 201, {
-        token,
-        user: {
-          id: data.user.id,
-          email: digits,
-          full_name: fullName,
-          phone,
-          role: 'user',
-          counter_id: null,
-          counter_name: null,
-        },
+      sendJson(res, 403, {
+        error: 'সাধারণ যাত্রীদের জন্য নিবন্ধন বা লগইনের প্রয়োজন নেই — সরাসরি টিকিট বুকিং করুন।',
       });
       return;
     }
 
-    // 5. Authentication: Current User (/auth/me)
+    // 5. Authentication: Current Staff User (/auth/me)
     if (method === 'GET' && (routePath === '/auth/me' || routePath === '/me')) {
       const authHeader = req.headers.authorization;
       const headerStr = Array.isArray(authHeader) ? authHeader[0] : authHeader || '';
@@ -389,7 +293,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         return;
       }
 
-      // 1. Check custom staff_sessions token first
       const { data: staffUser, error: staffErr } = await supabase.rpc('staff_me', {
         p_token: token,
       });
@@ -398,30 +301,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         return;
       }
 
-      // 2. Fallback to passenger Supabase Auth JWT
-      const { data: userData, error: userErr } = await supabase.auth.getUser(token);
-      if (userErr || !userData.user) {
-        sendJson(res, 401, { error: 'সেশন মেয়াদোত্তীর্ণ হয়েছে, আবার লগইন করুন' });
-        return;
-      }
-
-      const authedClient = createClient(supabaseUrl, supabaseAnonKey, {
-        global: { headers: { Authorization: `Bearer ${token}` } },
-        auth: { persistSession: false },
-      });
-
-      const { data: profile } = await authedClient
-        .from('profiles')
-        .select('*, counters(counter_name)')
-        .eq('id', userData.user.id)
-        .maybeSingle();
-
-      if (!profile || profile.role !== 'user') {
-        sendJson(res, 401, { error: 'সেশন মেয়াদোত্তীর্ণ হয়েছে, আবার লগইন করুন' });
-        return;
-      }
-
-      sendJson(res, 200, mapSupabaseProfile(profile as Record<string, unknown>));
+      sendJson(res, 401, { error: 'সেশন মেয়াদোত্তীর্ণ হয়েছে, আবার লগইন করুন' });
       return;
     }
 

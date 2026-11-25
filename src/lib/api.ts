@@ -484,7 +484,18 @@ export async function createBooking(payload: {
       p_selected_seats: payload.selected_seats,
     });
     if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
-    return data as Booking;
+    const rawBooking = data as Booking;
+    if (!rawBooking.trip && rawBooking.id) {
+      const { data: fullRow } = await supabase
+        .from('bookings')
+        .select('*, trips(route_from, route_to, departure_time, bus_type, price, counter_id, counters(counter_name))')
+        .eq('id', rawBooking.id)
+        .maybeSingle();
+      if (fullRow) {
+        return mapSupabaseBooking(fullRow as Record<string, unknown>);
+      }
+    }
+    return rawBooking;
   }
   return apiFetch<Booking>('/api/bookings', {
     method: 'POST',
@@ -584,41 +595,23 @@ export async function loginWithIdentifier(
       return { user: staffRes.user };
     }
 
-    // Never fall back to passenger auth for Master Super Admin identifier
-    if (cleanId.toLowerCase() === MASTER_ADMIN_USERNAME.toLowerCase()) {
-      throw new Error('Invalid username or password');
-    }
-
-    // 2. Registered Passenger fallback (Supabase Auth passenger accounts only)
-    const candidateEmail = cleanId.includes('@') ? cleanId : toPassengerAuthEmail(cleanId);
-    const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
-      email: candidateEmail,
-      password,
-    });
-
-    if (authErr || !authData.user) {
-      throw new Error('Invalid username or password');
-    }
-
-    const { data: profile, error: profErr } = await supabase
-      .from('profiles')
-      .select('*, counters(counter_name)')
-      .eq('id', authData.user.id)
-      .single();
-
-    if (profErr || !profile || profile.role !== 'user') {
-      await supabase.auth.signOut().catch(() => undefined);
-      throw new Error('Invalid username or password');
-    }
-
-    setStaffToken(null);
-    return { user: mapSupabaseProfile(profile as Record<string, unknown>) };
+    throw new Error('Invalid username or password');
   }
 
   const res = await apiFetch<{ token: string; user: Profile }>('/api/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email: identifier, password }),
   });
+  if (
+    res.user.role !== 'super_admin' &&
+    res.user.role !== 'counter_admin' &&
+    res.user.role !== 'counter_representative'
+  ) {
+    setAuthToken(null);
+    throw new Error(
+      'এই লগইন শুধুমাত্র অ্যাডমিন, কাউন্টার এবং প্রতিনিধির জন্য নির্ধারিত। সাধারণ যাত্রীরা লগইন ছাড়াই সরাসরি টিকিট বুক করতে পারবেন।'
+    );
+  }
   setAuthToken(res.token);
   return { user: res.user };
 }
@@ -701,25 +694,21 @@ export async function fetchCurrentUser(): Promise<Profile | null> {
       // Session expired or invalidated (e.g. after Admin password reset)
       setStaffToken(null);
     }
-
-    const { data } = await supabase.auth.getUser();
-    if (!data.user) return null;
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('*, counters(counter_name)')
-      .eq('id', data.user.id)
-      .maybeSingle();
-
-    if (!profile || profile.role !== 'user') {
-      return null;
-    }
-
-    return mapSupabaseProfile(profile as Record<string, unknown>);
+    return null;
   }
 
   if (!getAuthToken()) return null;
   try {
-    return await apiFetch<Profile>('/api/auth/me');
+    const profile = await apiFetch<Profile>('/api/auth/me');
+    if (
+      profile.role !== 'super_admin' &&
+      profile.role !== 'counter_admin' &&
+      profile.role !== 'counter_representative'
+    ) {
+      setAuthToken(null);
+      return null;
+    }
+    return profile;
   } catch {
     setAuthToken(null);
     return null;

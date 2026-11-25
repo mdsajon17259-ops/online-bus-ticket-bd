@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Bus, KeyRound, Lock, Phone, ShieldCheck, Ticket, User } from 'lucide-react';
+import { Bus, KeyRound, Lock, ShieldCheck, User } from 'lucide-react';
 import { useApp, type ActivePanel } from '../context/AppContext';
 import { extractErrorMessage, isMasterSuperAdminProfile } from '../lib/api';
 
@@ -11,24 +11,19 @@ interface AuthScreenProps {
 }
 
 const ROLE_LABELS: Record<string, string> = {
-  super_admin: 'মাস্টার সুপার অ্যাডমিন',
-  counter_admin: 'কাউন্টার অপারেটর',
+  super_admin: 'অ্যাডমিন (মাস্টার কন্ট্রোল)',
+  counter_admin: 'কাউন্টার পক্ষ (অপারেটর)',
   counter_representative: 'কাউন্টার প্রতিনিধি (শুধুমাত্র দেখার অনুমতি)',
-  user: 'সাধারণ যাত্রী',
 };
 
 export function AuthScreen({
   requiredRole,
-  redirectTo,
   title,
   subtitle,
 }: AuthScreenProps) {
-  const { login, register, setActivePanel, user, logout } = useApp();
-  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const { login, setActivePanel, setPassengerView, user, logout } = useApp();
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
-  const [fullName, setFullName] = useState('');
-  const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -37,10 +32,7 @@ export function AuthScreen({
     setLoading(true);
     setError('');
     try {
-      const profile =
-        mode === 'login'
-          ? await login(identifier, password)
-          : await register({ full_name: fullName, phone, password });
+      const profile = await login(identifier, password);
 
       if (isMasterSuperAdminProfile(profile)) {
         setActivePanel('admin');
@@ -48,18 +40,14 @@ export function AuthScreen({
         setActivePanel('operator');
       } else if (profile.role === 'counter_representative') {
         setActivePanel('representative');
-      } else if (
-        redirectTo &&
-        redirectTo !== 'admin' &&
-        redirectTo !== 'operator' &&
-        redirectTo !== 'representative'
-      ) {
-        setActivePanel(redirectTo);
       } else {
-        setActivePanel('passenger');
+        await logout();
+        setError(
+          'এই লগইন শুধুমাত্র অ্যাডমিন, কাউন্টার এবং প্রতিনিধির জন্য নির্ধারিত। সাধারণ যাত্রীরা লগইন ছাড়াই সরাসরি টিকিট বুক করতে পারবেন।'
+        );
       }
     } catch (err) {
-      setError(extractErrorMessage(err, 'Invalid username or password'));
+      setError(extractErrorMessage(err, 'সঠিক ইউজারনেম ও পাসওয়ার্ড দিন'));
     } finally {
       setLoading(false);
     }
@@ -98,10 +86,13 @@ export function AuthScreen({
             </button>
             <button
               type="button"
-              onClick={() => setActivePanel('passenger')}
+              onClick={() => {
+                setPassengerView('home');
+                setActivePanel('passenger');
+              }}
               className="min-h-[44px] px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-sm font-medium rounded-lg transition-colors"
             >
-              টিকেট বুকিংয়ে ফিরে যান
+              হোম পেজে ফিরে যান
             </button>
           </div>
         </div>
@@ -110,109 +101,41 @@ export function AuthScreen({
   }
 
   return (
-    <main className="max-w-4xl mx-auto px-4 sm:px-6 py-10 sm:py-14">
+    <main className="max-w-4xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
       <div className="grid grid-cols-1 md:grid-cols-12 gap-8 items-start">
-        {/* Unified Login / Register Form */}
-        <div className="md:col-span-7 bg-white border border-slate-200 rounded-xl p-6 sm:p-8">
-          <div className="mb-6">
+        {/* Staff-Only Login Form */}
+        <div className="md:col-span-7 bg-white border border-slate-200 rounded-xl p-6 sm:p-8 space-y-6">
+          <div>
             <h1 className="font-display text-2xl font-bold text-slate-900">
-              {title || (mode === 'login' ? 'অ্যাকাউন্টে লগইন করুন' : 'নতুন যাত্রী নিবন্ধন')}
+              {title || 'স্টাফ ও অ্যাডমিন লগইন'}
             </h1>
-            <p className="text-sm text-slate-600 mt-1">
-              {subtitle || 'আপনার ইউজারনেম (অথবা মোবাইল নম্বর) এবং পাসওয়ার্ড দিন। সিস্টেম স্বয়ংক্রিয়ভাবে আপনার নির্ধারিত প্যানেলে নিয়ে যাবে।'}
+            <p className="text-sm text-slate-600 mt-1.5 leading-relaxed">
+              {subtitle ||
+                'এই লগইন শুধুমাত্র অ্যাডমিন, কাউন্টার পক্ষ এবং কাউন্টার প্রতিনিধির জন্য। সাধারণ যাত্রীরা কোনো লগইন ছাড়াই সরাসরি টিকিট বুক করতে পারবেন।'}
             </p>
           </div>
 
-          {!requiredRole && (
-            <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg mb-6 w-fit">
-              <button
-                type="button"
-                onClick={() => {
-                  setMode('login');
-                  setError('');
-                }}
-                className={`px-4 py-1.5 text-xs font-semibold rounded-md transition-colors ${
-                  mode === 'login' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                লগইন করুন
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMode('register');
-                  setError('');
-                }}
-                className={`px-4 py-1.5 text-xs font-semibold rounded-md transition-colors ${
-                  mode === 'register' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                যাত্রী নিবন্ধন
-              </button>
-            </div>
-          )}
-
           <form onSubmit={handleSubmit} className="space-y-4">
-            {mode === 'register' ? (
-              <>
-                <div>
-                  <label htmlFor="auth-name" className="block text-xs font-medium text-slate-600 mb-1.5">
-                    যাত্রীর পূর্ণ নাম
-                  </label>
-                  <div className="relative">
-                    <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
-                    <input
-                      id="auth-name"
-                      type="text"
-                      required
-                      value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
-                      placeholder="রাশেদুল করিম"
-                      className="w-full min-h-[44px] pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label htmlFor="auth-phone" className="block text-xs font-medium text-slate-600 mb-1.5">
-                    মোবাইল নম্বর
-                  </label>
-                  <div className="relative">
-                    <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
-                    <input
-                      id="auth-phone"
-                      type="tel"
-                      required
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      placeholder="01711-000000"
-                      className="w-full min-h-[44px] pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700 tabular-nums"
-                    />
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div>
-                <label htmlFor="auth-identifier" className="block text-xs font-medium text-slate-600 mb-1.5">
-                  ইউজারনেম অথবা মোবাইল নম্বর
-                </label>
-                <div className="relative">
-                  <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
-                  <input
-                    id="auth-identifier"
-                    type="text"
-                    required
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    value={identifier}
-                    onChange={(e) => setIdentifier(e.target.value)}
-                    placeholder="ইউজারনেম বা মোবাইল নম্বর লিখুন"
-                    className="w-full min-h-[44px] pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
-                  />
-                </div>
+            <div>
+              <label htmlFor="auth-identifier" className="block text-xs font-medium text-slate-600 mb-1.5">
+                ইউজারনেম
+              </label>
+              <div className="relative">
+                <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
+                <input
+                  id="auth-identifier"
+                  type="text"
+                  required
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
+                  placeholder="অ্যাডমিন / কাউন্টার / প্রতিনিধি ইউজারনেম লিখুন"
+                  className="w-full min-h-[44px] pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
+                />
               </div>
-            )}
+            </div>
 
             <div>
               <label htmlFor="auth-password" className="block text-xs font-medium text-slate-600 mb-1.5">
@@ -244,31 +167,45 @@ export function AuthScreen({
               disabled={loading}
               className="w-full min-h-[44px] px-5 py-2.5 bg-blue-700 hover:bg-blue-800 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors"
             >
-              {loading ? 'যাচাই করা হচ্ছে...' : mode === 'login' ? 'লগইন করুন' : 'নিবন্ধন সম্পন্ন করুন'}
+              {loading ? 'যাচাই করা হচ্ছে...' : 'লগইন করুন'}
             </button>
           </form>
+
+          <div className="pt-4 border-t border-slate-100 flex items-center justify-between gap-3 text-xs text-slate-500">
+            <span>টিকিট কাটতে চাচ্ছেন? কোনো লগইন লাগবে না।</span>
+            <button
+              type="button"
+              onClick={() => {
+                setPassengerView('home');
+                setActivePanel('passenger');
+              }}
+              className="font-semibold text-blue-700 hover:underline whitespace-nowrap shrink-0"
+            >
+              সরাসরি বুকিংয়ে যান
+            </button>
+          </div>
         </div>
 
-        {/* Unified Role Routing Guide */}
+        {/* Strictly 3 Staff Role Routing Guide */}
         <aside className="md:col-span-5 bg-white border border-slate-200 rounded-xl p-6 space-y-5">
           <div>
             <h2 className="font-display text-base font-semibold text-slate-900">
-              একক লগইন ও স্বয়ংক্রিয় প্যানেল প্রবেশ
+              নির্ধারিত ৩টি রোল ও স্বয়ংক্রিয় প্যানেল
             </h2>
             <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-              সকল ব্যবহারকারী একই ফর্ম থেকে ইউজারনেম ও পাসওয়ার্ড ব্যবহার করে লগইন করবেন। লগইনের পর সিস্টেম স্বয়ংক্রিয়ভাবে আপনার নির্ধারিত ড্যাশবোর্ড চালু করবে।
+              ইউজারনেম ও পাসওয়ার্ড যাচাইয়ের পর সিস্টেম স্বয়ংক্রিয়ভাবে আপনার নির্ধারিত প্যানেলে নিয়ে যাবে।
             </p>
           </div>
 
           <div className="space-y-4 divide-y divide-slate-100">
             <div className="flex items-start gap-3 pt-1">
-              <span className="w-8 h-8 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center shrink-0">
-                <Ticket className="w-4 h-4" />
+              <span className="w-8 h-8 rounded-lg bg-slate-100 text-slate-800 flex items-center justify-center shrink-0">
+                <ShieldCheck className="w-4 h-4" />
               </span>
               <div>
-                <p className="text-xs font-semibold text-slate-900">সাধারণ যাত্রী</p>
+                <p className="text-xs font-semibold text-slate-900">১. অ্যাডমিন (Admin)</p>
                 <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
-                  নিবন্ধিত মোবাইল নম্বর ও পাসওয়ার্ড দিয়ে লগইন করে টিকেট বুকিং ও আপনার টিকেটের অবস্থা দেখুন।
+                  সম্পূর্ণ অ্যাপ নিয়ন্ত্রণ, নতুন কাউন্টার যোগ ও পরিচালনা এবং পাসওয়ার্ড পুনরুদ্ধার।
                 </p>
               </div>
             </div>
@@ -278,9 +215,9 @@ export function AuthScreen({
                 <Bus className="w-4 h-4" />
               </span>
               <div>
-                <p className="text-xs font-semibold text-slate-900">কাউন্টার প্যানেল (পূর্ণ কাউন্টার নিয়ন্ত্রণ)</p>
+                <p className="text-xs font-semibold text-slate-900">২. কাউন্টার পক্ষ (Counter)</p>
                 <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
-                  কাউন্টার ইউজারনেম ও পাসওয়ার্ড দিয়ে লগইন করলে নিজস্ব কাউন্টারের ট্রিপ, ভাড়া, আসন ও বুকিং সম্পাদনা ও পরিচালনা করা যাবে।
+                  নিজস্ব কাউন্টারের সিট ম্যাপ পরিচালনা, সরাসরি টিকিট ইস্যু এবং যাত্রীর বুকিং যাচাই ও অনুমোদন।
                 </p>
               </div>
             </div>
@@ -290,21 +227,9 @@ export function AuthScreen({
                 <User className="w-4 h-4" />
               </span>
               <div>
-                <p className="text-xs font-semibold text-slate-900">কাউন্টার প্রতিনিধি প্যানেল (শুধুমাত্র দেখার অনুমতি)</p>
+                <p className="text-xs font-semibold text-slate-900">৩. প্রতিনিধি (Representative)</p>
                 <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
-                  প্রতিনিধি ইউজারনেম দিয়ে লগইন করলে শুধুমাত্র নির্ধারিত কাউন্টারের টিকেট বিক্রি ও বুকিং রিপোর্ট দেখা যাবে (কোনো পরিবর্তন করা যাবে না)।
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-3 pt-4">
-              <span className="w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
-                <ShieldCheck className="w-4 h-4" />
-              </span>
-              <div>
-                <p className="text-xs font-semibold text-slate-900">অ্যাডমিন প্যানেল</p>
-                <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
-                  নির্ধারিত অ্যাডমিন ক্রেডেনশিয়াল দিয়ে লগইন করলে সরাসরি পূর্ণ ক্ষমতাসম্পন্ন মাস্টার কন্ট্রোল প্যানেল চালু হবে।
+                  নির্ধারিত কাউন্টারের ট্রিপ, সিট ও বিক্রয় রিপোর্ট দেখার অনুমতি (শুধুমাত্র দেখার জন্য, কোনো পরিবর্তন নয়)।
                 </p>
               </div>
             </div>

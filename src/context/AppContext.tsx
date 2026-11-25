@@ -36,7 +36,7 @@ interface AppContextValue {
 const DEFAULT_SETTINGS: AppSettings = {
   id: 1,
   organization_name: 'দেশ ভ্রমণ / Desh Travels',
-  organization_logo_url: '/src/assets/images/default_org_logo_1794840144839.jpg',
+  organization_logo_url: '/src/assets/images/desh_travels_logo_1795618756599.jpg',
   updated_at: new Date().toISOString(),
 };
 

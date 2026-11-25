@@ -41,9 +41,14 @@ export function GlobalHeader() {
           onClick={() => handleNavigate('passenger')}
           className="flex items-center gap-2.5 text-left whitespace-nowrap shrink-0 min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 rounded-lg pr-1"
         >
-          {settings.organization_logo_url && !logoError ? (
+          {!logoError ? (
             <img
-              src={settings.organization_logo_url}
+              src={
+                settings.organization_logo_url &&
+                settings.organization_logo_url !== '/src/assets/images/default_org_logo_1794840144839.jpg'
+                  ? settings.organization_logo_url
+                  : '/src/assets/images/desh_travels_logo_1795618756599.jpg'
+              }
               alt={settings.organization_name}
               referrerPolicy="no-referrer"
               onError={() => setLogoError(true)}
@@ -54,7 +59,7 @@ export function GlobalHeader() {
               <Bus className="w-4 h-4" />
             </span>
           )}
-          <span className="font-display text-base sm:text-lg font-bold tracking-tight text-slate-900 truncate max-w-[165px] sm:max-w-[260px]">
+          <span className="font-display text-sm sm:text-lg font-bold tracking-tight text-slate-900 truncate max-w-[132px] sm:max-w-[260px]">
             {settings.organization_name}
           </span>
         </button>
@@ -111,9 +116,9 @@ export function GlobalHeader() {
             <button
               type="button"
               onClick={() => handleNavigate('auth')}
-              className="inline-flex items-center justify-center px-3.5 sm:px-4 py-2 min-h-[40px] text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded-lg transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700"
+              className="inline-flex items-center justify-center px-2.5 sm:px-4 py-2 min-h-[40px] text-[11px] sm:text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded-lg transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700"
             >
-              লগইন করুন
+              স্টাফ / অ্যাডমিন লগইন
             </button>
           )}
 

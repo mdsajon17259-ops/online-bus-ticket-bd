@@ -9,23 +9,21 @@ import {
   Download,
   ExternalLink,
   FileText,
-  KeyRound,
   MapPin,
   Phone,
   Printer,
   RefreshCw,
   Search,
+  ShieldCheck,
   Ticket,
   TrainFront,
   User,
-  UserCheck,
   X,
 } from 'lucide-react';
 import {
   createBooking,
   extractErrorMessage,
   fetchCounters,
-  fetchMyBookings,
   fetchTripSeats,
   fetchTrips,
   lookupBookings,
@@ -56,6 +54,8 @@ const PAYMENT_METHODS = [
   { id: 'কাউন্টারে নগদ', label: 'কাউন্টারে নগদ', requiresRef: false },
 ] as const;
 
+const CUSTOM_BRAND_LOGO = '/src/assets/images/desh_travels_logo_1795618756599.jpg';
+
 function parseCombinedRouteQuery(raw: string): { from?: string; to?: string; text: string } {
   const cleaned = raw.trim();
   if (!cleaned) return { text: '' };
@@ -71,8 +71,8 @@ function parseCombinedRouteQuery(raw: string): { from?: string; to?: string; tex
 }
 
 export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
-  const { settings, user, login, register, setActivePanel, passengerView, setPassengerView } =
-    useApp();
+  const { settings, setActivePanel, passengerView, setPassengerView } = useApp();
+  const [homeLogoError, setHomeLogoError] = useState(false);
 
   // Search filters (Bus View)
   const [fromCity, setFromCity] = useState('');
@@ -100,14 +100,10 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
   const [loadingSeats, setLoadingSeats] = useState(false);
   const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
 
-  // Passenger form + quick auth + payment inside booking flow
-  const [authStepMode, setAuthStepMode] = useState<'register' | 'login'>('register');
+  // Direct Passenger Info + Payment (No Login Required)
   const [passengerName, setPassengerName] = useState('');
   const [passengerPhone, setPassengerPhone] = useState('');
   const [boardingPoint, setBoardingPoint] = useState('');
-  const [passengerPassword, setPassengerPassword] = useState('');
-  const [loginIdentifier, setLoginIdentifier] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<string>('বিকাশ (bKash)');
   const [paymentRef, setPaymentRef] = useState('');
 
@@ -116,11 +112,9 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
   const [confirmedReceipt, setConfirmedReceipt] = useState<Booking | null>(null);
   const [confirmedPaymentMeta, setConfirmedPaymentMeta] = useState<TicketPaymentMeta | null>(null);
 
-  // Booking lookup & my bookings state
+  // Booking lookup state
   const [lookupQuery, setLookupQuery] = useState('');
   const [lookupResults, setLookupResults] = useState<Booking[] | null>(null);
-  const [myBookings, setMyBookings] = useState<Booking[]>([]);
-  const [loadingMyBookings, setLoadingMyBookings] = useState(false);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupError, setLookupError] = useState('');
   const [slipBooking, setSlipBooking] = useState<Booking | null>(null);
@@ -164,25 +158,6 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
   useEffect(() => {
     loadInitialBusData();
   }, [loadInitialBusData]);
-
-  // Keep passenger fields prefilled when logged in
-  useEffect(() => {
-    if (user) {
-      if (user.full_name) setPassengerName(user.full_name);
-      if (user.phone) setPassengerPhone(user.phone);
-    }
-  }, [user]);
-
-  // Auto-load logged-in passenger's own bookings when viewing টিকেট যাচাই
-  useEffect(() => {
-    if (mode === 'lookup' && user) {
-      setLoadingMyBookings(true);
-      fetchMyBookings()
-        .then(setMyBookings)
-        .catch(() => setMyBookings([]))
-        .finally(() => setLoadingMyBookings(false));
-    }
-  }, [mode, user]);
 
   const parsedPlace = useMemo(() => parseCombinedRouteQuery(placeQuery), [placeQuery]);
   const effectiveFrom = (fromCity.trim() || parsedPlace.from || '').trim();
@@ -292,13 +267,7 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
     setBookingModalOpen(true);
     setConfirmedReceipt(null);
     setConfirmedPaymentMeta(null);
-    setPassengerPassword('');
-    setLoginPassword('');
     setPaymentRef('');
-    if (user) {
-      setPassengerName(user.full_name || '');
-      setPassengerPhone(user.phone || '');
-    }
     await loadSeatsForModalTrip(trip);
   };
 
@@ -311,13 +280,7 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
     setConfirmedPaymentMeta(null);
     setBookingError('');
     setSelectedSeats([]);
-    setPassengerPassword('');
-    setLoginPassword('');
     setPaymentRef('');
-    if (user) {
-      setPassengerName(user.full_name || '');
-      setPassengerPhone(user.phone || '');
-    }
 
     if (candidateTrips.length > 0) {
       await loadSeatsForModalTrip(candidateTrips[0]);
@@ -364,6 +327,12 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
       setBookingError('অনুগ্রহ করে কমপক্ষে একটি খালি আসন নির্বাচন করুন।');
       return;
     }
+    const finalName = passengerName.trim();
+    const finalPhone = passengerPhone.trim();
+    if (!finalName || !finalPhone) {
+      setBookingError('অনুগ্রহ করে যাত্রীর নাম ও মোবাইল নম্বর লিখুন।');
+      return;
+    }
     if (activePaymentConfig.requiresRef && !paymentRef.trim()) {
       setBookingError('অনুগ্রহ করে পেমেন্ট ট্রানজেকশন আইডি বা পেমেন্ট মোবাইল নম্বর লিখুন।');
       return;
@@ -372,31 +341,26 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
     setSubmittingBooking(true);
     setBookingError('');
     try {
-      let activeUser = user;
-      let finalName = passengerName.trim();
-      let finalPhone = passengerPhone.trim();
-
-      if (!activeUser) {
-        if (authStepMode === 'register') {
-          activeUser = await register({
-            full_name: finalName,
-            phone: finalPhone,
-            password: passengerPassword,
-          });
-        } else {
-          activeUser = await login(loginIdentifier, loginPassword);
-          finalName = activeUser.full_name || activeUser.email;
-          finalPhone = activeUser.phone || loginIdentifier.trim();
-        }
-      }
-
-      const booking = await createBooking({
+      const rawBooking = await createBooking({
         trip_id: activeTrip.id,
-        passenger_name: finalName || activeUser.full_name || activeUser.email,
-        phone: finalPhone || activeUser.phone || activeUser.email,
-        boarding_point: boardingPoint,
+        passenger_name: finalName,
+        phone: finalPhone,
+        boarding_point: boardingPoint.trim() || modalCounter?.address || 'প্রধান কাউন্টার',
         selected_seats: selectedSeats,
       });
+
+      const booking: Booking = {
+        ...rawBooking,
+        trip: rawBooking.trip || {
+          route_from: activeTrip.route_from,
+          route_to: activeTrip.route_to,
+          departure_time: activeTrip.departure_time,
+          bus_type: activeTrip.bus_type,
+          price: activeTrip.price,
+          counter_id: activeTrip.counter_id,
+          counter_name: activeTrip.counter_name || modalCounter?.counter_name || 'কাউন্টার',
+        },
+      };
 
       const payMeta: TicketPaymentMeta = {
         method: paymentMethod,
@@ -578,65 +542,32 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
           </section>
         )}
 
-        {user ? (
-          <section className="space-y-4">
-            <div>
-              <h2 className="font-display text-xl font-bold text-slate-900">
-                আমার বুকিংসমূহ ({user.full_name || user.email})
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                আপনার অ্যাকাউন্ট থেকে করা সকল টিকেট বুকিংয়ের লাইভ অবস্থা
-              </p>
-            </div>
-            {loadingMyBookings ? (
-              <div className="h-28 bg-white border border-slate-200 rounded-xl animate-pulse" />
-            ) : myBookings.length === 0 ? (
-              <div className="bg-white border border-slate-200 rounded-xl p-8 text-center">
-                <Ticket className="w-8 h-8 text-slate-400 mx-auto mb-2" aria-hidden="true" />
-                <p className="text-sm font-semibold text-slate-900">আপনার এখনো কোনো টিকেট বুকিং নেই</p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPassengerView('bus');
-                    setActivePanel('passenger');
-                  }}
-                  className="mt-3 min-h-[44px] px-4 py-2 text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded-lg"
-                >
-                  টিকেট বুকিং করুন
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-4">{myBookings.map(renderBookingCard)}</div>
-            )}
-          </section>
-        ) : (
-          lookupResults === null && (
-            <div className="bg-white border border-slate-200 rounded-xl p-8 text-center">
-              <Ticket className="w-8 h-8 text-slate-400 mx-auto mb-3" aria-hidden="true" />
-              <h2 className="font-display text-base font-semibold text-slate-900">
-                তাৎক্ষণিক বুকিং যাচাই ও টিকিট ডাউনলোড
-              </h2>
-              <p className="text-sm text-slate-500 mt-1 max-w-md mx-auto">
-                কাউন্টার অপারেটর যাচাই করার আগ পর্যন্ত বুকিং «অপেক্ষমাণ» অবস্থায় থাকে। পরীক্ষামূলকভাবে{' '}
-                <button
-                  type="button"
-                  onClick={() => setLookupQuery('01819334455')}
-                  className="text-blue-700 font-medium underline underline-offset-2"
-                >
-                  01819334455
-                </button>{' '}
-                অথবা{' '}
-                <button
-                  type="button"
-                  onClick={() => setLookupQuery('BK-10421')}
-                  className="text-blue-700 font-medium underline underline-offset-2"
-                >
-                  BK-10421
-                </button>{' '}
-                লিখে খুঁজুন।
-              </p>
-            </div>
-          )
+        {lookupResults === null && (
+          <div className="bg-white border border-slate-200 rounded-xl p-8 text-center">
+            <Ticket className="w-8 h-8 text-slate-400 mx-auto mb-3" aria-hidden="true" />
+            <h2 className="font-display text-base font-semibold text-slate-900">
+              তাৎক্ষণিক বুকিং যাচাই ও টিকিট ডাউনলোড
+            </h2>
+            <p className="text-sm text-slate-500 mt-1 max-w-md mx-auto">
+              কাউন্টার অপারেটর যাচাই করার আগ পর্যন্ত বুকিং «অপেক্ষমাণ» অবস্থায় থাকে। পরীক্ষামূলকভাবে{' '}
+              <button
+                type="button"
+                onClick={() => setLookupQuery('01819334455')}
+                className="text-blue-700 font-medium underline underline-offset-2"
+              >
+                01819334455
+              </button>{' '}
+              অথবা{' '}
+              <button
+                type="button"
+                onClick={() => setLookupQuery('BK-10421')}
+                className="text-blue-700 font-medium underline underline-offset-2"
+              >
+                BK-10421
+              </button>{' '}
+              লিখে খুঁজুন।
+            </p>
+          </div>
         )}
 
         {slipBooking && (
@@ -651,23 +582,58 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
   }
 
   // --------------------------------------------------------------------------
-  // VIEW 1: HOME SCREEN (Clean 2-Column Square Icon Grid)
+  // VIEW 1: HOME SCREEN (Brand Logo + Larger 2-Column Cards + Verification/Trust)
   // --------------------------------------------------------------------------
   if (passengerView === 'home') {
+    const resolvedLogoUrl =
+      settings.organization_logo_url &&
+      settings.organization_logo_url !== '/src/assets/images/default_org_logo_1794840144839.jpg'
+        ? settings.organization_logo_url
+        : CUSTOM_BRAND_LOGO;
+
     return (
-      <main className="min-h-[calc(100vh-140px)] flex items-center justify-center px-4 sm:px-6 py-10">
-        <div className="w-full max-w-md sm:max-w-lg mx-auto">
+      <main className="px-4 sm:px-6 pt-5 sm:pt-8 pb-10">
+        <div className="w-full max-w-lg sm:max-w-xl mx-auto space-y-5 sm:space-y-6">
+          {/* Compact Custom Brand Logo & Title Header */}
+          <div className="flex flex-col items-center text-center gap-2.5">
+            {!homeLogoError ? (
+              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-white border border-slate-200 shadow-xs p-1.5 overflow-hidden flex items-center justify-center">
+                <img
+                  src={resolvedLogoUrl}
+                  alt={settings.organization_name}
+                  referrerPolicy="no-referrer"
+                  onError={() => setHomeLogoError(true)}
+                  className="w-full h-full object-contain rounded-xl"
+                />
+              </div>
+            ) : (
+              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-blue-700 text-white shadow-xs flex items-center justify-center">
+                <Bus className="w-9 h-9" aria-hidden="true" />
+              </div>
+            )}
+
+            <div>
+              <h1 className="font-display text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+                {settings.organization_name}
+              </h1>
+              <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
+                লগইন ছাড়াই সরাসরি বাস ও ট্রেন টিকিট সেবা
+              </p>
+            </div>
+          </div>
+
+          {/* 2 Side-by-Side Clean Large Cards */}
           <div className="grid grid-cols-2 gap-4 sm:gap-6">
             {/* Card 1: বাস টিকিট */}
             <button
               type="button"
               onClick={() => setPassengerView('bus')}
-              className="group aspect-square bg-white border border-slate-200 hover:border-blue-700 shadow-xs hover:shadow-md rounded-2xl p-5 sm:p-6 flex flex-col items-center justify-center gap-3.5 text-center transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
+              className="group min-h-[172px] sm:min-h-[212px] bg-white border border-slate-200 hover:border-blue-700 shadow-xs hover:shadow-md rounded-2xl p-6 sm:p-7 flex flex-col items-center justify-center gap-4 text-center transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
             >
-              <span className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-blue-50 text-blue-700 flex items-center justify-center group-hover:bg-blue-700 group-hover:text-white transition-colors">
-                <Bus className="w-7 h-7 sm:w-8 sm:h-8" aria-hidden="true" />
+              <span className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-blue-50 text-blue-700 flex items-center justify-center group-hover:bg-blue-700 group-hover:text-white transition-colors">
+                <Bus className="w-9 h-9 sm:w-11 sm:h-11" aria-hidden="true" />
               </span>
-              <span className="font-display text-base sm:text-lg font-bold text-slate-900">
+              <span className="font-display text-lg sm:text-2xl font-bold text-slate-900">
                 বাস টিকিট
               </span>
             </button>
@@ -676,16 +642,59 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
             <button
               type="button"
               onClick={() => setPassengerView('train')}
-              className="group aspect-square bg-white border border-slate-200 hover:border-emerald-700 shadow-xs hover:shadow-md rounded-2xl p-5 sm:p-6 flex flex-col items-center justify-center gap-3.5 text-center transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 focus-visible:ring-offset-2"
+              className="group min-h-[172px] sm:min-h-[212px] bg-white border border-slate-200 hover:border-emerald-700 shadow-xs hover:shadow-md rounded-2xl p-6 sm:p-7 flex flex-col items-center justify-center gap-4 text-center transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 focus-visible:ring-offset-2"
             >
-              <span className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center group-hover:bg-emerald-700 group-hover:text-white transition-colors">
-                <TrainFront className="w-7 h-7 sm:w-8 sm:h-8" aria-hidden="true" />
+              <span className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center group-hover:bg-emerald-700 group-hover:text-white transition-colors">
+                <TrainFront className="w-9 h-9 sm:w-11 sm:h-11" aria-hidden="true" />
               </span>
-              <span className="font-display text-base sm:text-lg font-bold text-slate-900">
+              <span className="font-display text-lg sm:text-2xl font-bold text-slate-900">
                 ট্রেন টিকিট
               </span>
             </button>
           </div>
+
+          {/* Quick Ticket Verification Action */}
+          <button
+            type="button"
+            onClick={() => setActivePanel('bookings')}
+            className="w-full min-h-[52px] px-4 py-3 bg-white border border-slate-200 hover:border-blue-700 hover:bg-blue-50/40 rounded-xl flex items-center justify-between gap-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="w-10 h-10 rounded-lg bg-slate-100 text-blue-700 flex items-center justify-center shrink-0">
+                <Search className="w-5 h-5" aria-hidden="true" />
+              </span>
+              <div className="min-w-0">
+                <span className="block font-display text-sm sm:text-base font-bold text-slate-900">
+                  টিকিট যাচাই
+                </span>
+                <span className="block text-xs text-slate-500 truncate">
+                  মোবাইল নম্বর বা বুকিং আইডি দিয়ে স্ট্যাটাস দেখুন ও ডাউনলোড করুন
+                </span>
+              </div>
+            </div>
+            <ArrowRight className="w-4 h-4 text-slate-400 shrink-0" aria-hidden="true" />
+          </button>
+
+          {/* Compact 3-Item Trust Strip */}
+          <div className="grid grid-cols-3 bg-white border border-slate-200 rounded-xl divide-x divide-slate-200">
+            <div className="px-2 py-3 flex flex-col sm:flex-row items-center justify-center gap-1.5 text-center">
+              <CheckCircle2 className="w-4 h-4 text-blue-700 shrink-0" aria-hidden="true" />
+              <span className="text-xs font-semibold text-slate-700">সহজ বুকিং</span>
+            </div>
+            <div className="px-2 py-3 flex flex-col sm:flex-row items-center justify-center gap-1.5 text-center">
+              <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0" aria-hidden="true" />
+              <span className="text-xs font-semibold text-slate-700">নির্ভুল তথ্য</span>
+            </div>
+            <div className="px-2 py-3 flex flex-col sm:flex-row items-center justify-center gap-1.5 text-center">
+              <Ticket className="w-4 h-4 text-slate-700 shrink-0" aria-hidden="true" />
+              <span className="text-xs font-semibold text-slate-700">একসাথে বাস ও ট্রেন</span>
+            </div>
+          </div>
+
+          {/* Small Support Note Above Footer */}
+          <p className="text-center text-xs text-slate-500 pt-1">
+            টিকিট বা আসন সংক্রান্ত যেকোনো সহায়তার জন্য সংশ্লিষ্ট বাস কাউন্টারে যোগাযোগ করুন।
+          </p>
         </div>
       </main>
     );
@@ -1384,191 +1393,50 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
                       )}
                     </div>
 
-                    {/* Right: Passenger Info + Payment + Submit */}
+                    {/* Right: Direct Passenger Info + Payment + Submit (No Login Required) */}
                     <div className="md:col-span-6">
                       <h3 className="font-display text-sm font-semibold text-slate-900 mb-3">
-                        {user
-                          ? '০২. যাত্রীর তথ্য ও পেমেন্ট'
-                          : '০২. দ্রুত নিবন্ধন / লগইন, তথ্য ও পেমেন্ট'}
+                        ০২. যাত্রীর তথ্য ও পেমেন্ট (লগইন ছাড়াই সরাসরি বুকিং)
                       </h3>
 
                       <form onSubmit={handleBookingSubmit} className="space-y-4">
-                        {user ? (
-                          <>
-                            <div className="p-3 rounded-lg bg-blue-50/70 border border-blue-200 flex items-center gap-2.5 text-xs text-blue-900">
-                              <UserCheck className="w-4 h-4 text-blue-700 shrink-0" aria-hidden="true" />
-                              <span>
-                                লগইনকৃত যাত্রী: <strong>{user.full_name || user.email}</strong>
-                              </span>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label htmlFor="p-name" className="block text-xs font-medium text-slate-600 mb-1">
+                              যাত্রীর পূর্ণ নাম *
+                            </label>
+                            <div className="relative">
+                              <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
+                              <input
+                                id="p-name"
+                                type="text"
+                                required
+                                value={passengerName}
+                                onChange={(e) => setPassengerName(e.target.value)}
+                                placeholder="রাশেদুল করিম"
+                                className="w-full min-h-[44px] pl-9 pr-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
+                              />
                             </div>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                              <div>
-                                <label htmlFor="p-name" className="block text-xs font-medium text-slate-600 mb-1">
-                                  যাত্রীর পূর্ণ নাম
-                                </label>
-                                <div className="relative">
-                                  <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
-                                  <input
-                                    id="p-name"
-                                    type="text"
-                                    required
-                                    value={passengerName}
-                                    onChange={(e) => setPassengerName(e.target.value)}
-                                    placeholder="রাশেদুল করিম"
-                                    className="w-full min-h-[44px] pl-9 pr-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
-                                  />
-                                </div>
-                              </div>
-
-                              <div>
-                                <label htmlFor="p-phone" className="block text-xs font-medium text-slate-600 mb-1">
-                                  মোবাইল নম্বর
-                                </label>
-                                <div className="relative">
-                                  <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
-                                  <input
-                                    id="p-phone"
-                                    type="tel"
-                                    required
-                                    value={passengerPhone}
-                                    onChange={(e) => setPassengerPhone(e.target.value)}
-                                    placeholder="01711-000000"
-                                    className="w-full min-h-[44px] pl-9 pr-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700 tabular-nums"
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                          </>
-                        ) : (
-                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-                            <div className="flex items-center gap-1 p-1 bg-slate-200/70 rounded-lg w-fit">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setAuthStepMode('register');
-                                  setBookingError('');
-                                }}
-                                className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
-                                  authStepMode === 'register'
-                                    ? 'bg-white text-slate-900 shadow-xs'
-                                    : 'text-slate-600 hover:text-slate-900'
-                                }`}
-                              >
-                                নতুন যাত্রী
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setAuthStepMode('login');
-                                  setBookingError('');
-                                }}
-                                className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
-                                  authStepMode === 'login'
-                                    ? 'bg-white text-slate-900 shadow-xs'
-                                    : 'text-slate-600 hover:text-slate-900'
-                                }`}
-                              >
-                                আগে অ্যাকাউন্ট আছে
-                              </button>
-                            </div>
-
-                            {authStepMode === 'register' ? (
-                              <div className="space-y-2.5">
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                                  <div>
-                                    <label htmlFor="q-name" className="block text-xs font-medium text-slate-600 mb-1">
-                                      যাত্রীর পূর্ণ নাম
-                                    </label>
-                                    <div className="relative">
-                                      <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
-                                      <input
-                                        id="q-name"
-                                        type="text"
-                                        required
-                                        value={passengerName}
-                                        onChange={(e) => setPassengerName(e.target.value)}
-                                        placeholder="রাশেদুল করিম"
-                                        className="w-full min-h-[42px] pl-9 pr-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
-                                      />
-                                    </div>
-                                  </div>
-
-                                  <div>
-                                    <label htmlFor="q-phone" className="block text-xs font-medium text-slate-600 mb-1">
-                                      মোবাইল নম্বর
-                                    </label>
-                                    <div className="relative">
-                                      <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
-                                      <input
-                                        id="q-phone"
-                                        type="tel"
-                                        required
-                                        value={passengerPhone}
-                                        onChange={(e) => setPassengerPhone(e.target.value)}
-                                        placeholder="01711-000000"
-                                        className="w-full min-h-[42px] pl-9 pr-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700 tabular-nums"
-                                      />
-                                    </div>
-                                  </div>
-                                </div>
-
-                                <div>
-                                  <label htmlFor="q-pass" className="block text-xs font-medium text-slate-600 mb-1">
-                                    পাসওয়ার্ড সেট করুন (কমপক্ষে ৪ অক্ষর)
-                                  </label>
-                                  <div className="relative">
-                                    <KeyRound className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
-                                    <input
-                                      id="q-pass"
-                                      type="password"
-                                      required
-                                      minLength={4}
-                                      value={passengerPassword}
-                                      onChange={(e) => setPassengerPassword(e.target.value)}
-                                      placeholder="••••"
-                                      className="w-full min-h-[42px] pl-9 pr-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                                <div>
-                                  <label htmlFor="ql-id" className="block text-xs font-medium text-slate-600 mb-1">
-                                    মোবাইল নম্বর বা ইউজারনেম
-                                  </label>
-                                  <input
-                                    id="ql-id"
-                                    type="text"
-                                    required
-                                    autoCapitalize="none"
-                                    autoCorrect="off"
-                                    spellCheck={false}
-                                    value={loginIdentifier}
-                                    onChange={(e) => setLoginIdentifier(e.target.value)}
-                                    placeholder="01711223344"
-                                    className="w-full min-h-[42px] px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
-                                  />
-                                </div>
-                                <div>
-                                  <label htmlFor="ql-pass" className="block text-xs font-medium text-slate-600 mb-1">
-                                    পাসওয়ার্ড
-                                  </label>
-                                  <input
-                                    id="ql-pass"
-                                    type="password"
-                                    required
-                                    value={loginPassword}
-                                    onChange={(e) => setLoginPassword(e.target.value)}
-                                    placeholder="••••"
-                                    className="w-full min-h-[42px] px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700"
-                                  />
-                                </div>
-                              </div>
-                            )}
                           </div>
-                        )}
+
+                          <div>
+                            <label htmlFor="p-phone" className="block text-xs font-medium text-slate-600 mb-1">
+                              মোবাইল নম্বর *
+                            </label>
+                            <div className="relative">
+                              <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
+                              <input
+                                id="p-phone"
+                                type="tel"
+                                required
+                                value={passengerPhone}
+                                onChange={(e) => setPassengerPhone(e.target.value)}
+                                placeholder="01711-000000"
+                                className="w-full min-h-[44px] pl-9 pr-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700 tabular-nums"
+                              />
+                            </div>
+                          </div>
+                        </div>
 
                         <div>
                           <label htmlFor="p-boarding" className="block text-xs font-medium text-slate-600 mb-1">

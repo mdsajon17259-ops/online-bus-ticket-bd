@@ -259,7 +259,7 @@ function seedDatabaseIfEmpty() {
 
     db.prepare(
       'INSERT INTO app_settings (id, organization_name, organization_logo_url, updated_at) VALUES (1, ?, ?, ?)'
-    ).run('দেশ ভ্রমণ / Desh Travels', '/src/assets/images/default_org_logo_1794840144839.jpg', now);
+    ).run('দেশ ভ্রমণ / Desh Travels', '/src/assets/images/desh_travels_logo_1795618756599.jpg', now);
 
     const c1 = 'c-green-line';
     const c2 = 'c-hanif-enterprise';
@@ -449,6 +449,11 @@ function ensureSeededRepresentatives() {
   }
 }
 ensureSeededRepresentatives();
+
+// Upgrade legacy default logo URL to the custom Desh Travels brand logo if unchanged
+db.prepare(
+  "UPDATE app_settings SET organization_logo_url = '/src/assets/images/desh_travels_logo_1795618756599.jpg' WHERE id = 1 AND (organization_logo_url = '' OR organization_logo_url = '/src/assets/images/default_org_logo_1794840144839.jpg')"
+).run();
 
 // Express Auth Middleware (verifies token signature + DB token_version to invalidate reset sessions)
 function attachUser(req: AuthedRequest, _res: Response, next: NextFunction) {
@@ -694,7 +699,7 @@ async function startServer() {
     res.json(seats);
   });
 
-  app.post('/api/bookings', requireAuth, (req: AuthedRequest, res) => {
+  app.post('/api/bookings', (req: AuthedRequest, res) => {
     const { trip_id, passenger_name, phone, boarding_point, selected_seats } = req.body as {
       trip_id?: string;
       passenger_name?: string;
@@ -739,13 +744,14 @@ async function startServer() {
         const bookingId = `BK-${Math.floor(10000 + Math.random() * 89999)}`;
         const totalFare = trip.price * selected_seats.length;
         const now = new Date().toISOString();
+        const actorUserId = req.user?.id || null;
 
         db.prepare(
           'INSERT INTO bookings (id, trip_id, user_id, passenger_name, phone, boarding_point, selected_seats, total_fare, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         ).run(
           bookingId,
           trip_id,
-          req.user!.id,
+          actorUserId,
           passenger_name.trim(),
           phone.trim(),
           (boarding_point || '').trim(),
@@ -758,7 +764,7 @@ async function startServer() {
         return {
           id: bookingId,
           trip_id,
-          user_id: req.user!.id,
+          user_id: actorUserId,
           passenger_name: passenger_name.trim(),
           phone: phone.trim(),
           boarding_point: (boarding_point || '').trim(),
@@ -938,6 +944,13 @@ async function startServer() {
       return;
     }
 
+    if (row.role !== 'counter_admin' && row.role !== 'counter_representative') {
+      res.status(403).json({
+        error: 'এই লগইন শুধুমাত্র অ্যাডমিন, কাউন্টার এবং প্রতিনিধির জন্য নির্ধারিত। সাধারণ যাত্রীরা লগইন ছাড়াই সরাসরি টিকিট বুক করতে পারবেন।',
+      });
+      return;
+    }
+
     const authUser: AuthUser = {
       id: row.id,
       email: row.email,
@@ -964,60 +977,9 @@ async function startServer() {
 
   app.post(['/api/auth/login', '/api/login'], handleLogin);
 
-  const handleRegister = (req: Request, res: Response) => {
-    const { email, password, full_name, phone } = req.body as {
-      email?: string;
-      password?: string;
-      full_name?: string;
-      phone?: string;
-    };
-    const cleanName = (full_name || '').trim();
-    const cleanPhone = (phone || '').trim();
-    const normalizedPhone = cleanPhone.replace(/[\s-]/g, '');
-    const identifier = (email || '').trim().toLowerCase() || normalizedPhone;
-
-    if (!cleanName || !cleanPhone || !password || password.length < 4) {
-      res.status(400).json({ error: 'পূর্ণ নাম, মোবাইল নম্বর এবং কমপক্ষে ৪ অক্ষরের পাসওয়ার্ড দিন' });
-      return;
-    }
-
-    if (identifier.toLowerCase() === MASTER_ADMIN_USERNAME.toLowerCase()) {
-      res.status(409).json({ error: 'এই ইউজারনেমটি সংরক্ষিত' });
-      return;
-    }
-
-    const existing = db
-      .prepare(
-        "SELECT id FROM profiles WHERE LOWER(email) = LOWER(?) OR (phone != '' AND replace(replace(phone, '-', ''), ' ', '') = ?)"
-      )
-      .get(identifier, normalizedPhone);
-    if (existing) {
-      res.status(409).json({ error: 'এই মোবাইল নম্বর বা ইমেইল দিয়ে ইতিমধ্যে অ্যাকাউন্ট রয়েছে। অনুগ্রহ করে লগইন করুন।' });
-      return;
-    }
-
-    const id = crypto.randomUUID();
-    const now = new Date().toISOString();
-    db.prepare(
-      'INSERT INTO profiles (id, email, full_name, phone, password_hash, role, counter_id, token_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)'
-    ).run(id, identifier, cleanName, cleanPhone, hashPassword(password), 'user', null, now);
-
-    const authUser: AuthUser = {
-      id,
-      email: identifier,
-      role: 'user',
-      counter_id: null,
-      token_version: 1,
-    };
-
-    res.status(201).json({
-      token: signToken(authUser),
-      user: {
-        ...authUser,
-        full_name: cleanName,
-        phone: cleanPhone,
-        counter_name: null,
-      },
+  const handleRegister = (_req: Request, res: Response) => {
+    res.status(403).json({
+      error: 'সাধারণ যাত্রীদের জন্য নিবন্ধন বা লগইনের প্রয়োজন নেই — সরাসরি টিকিট বুকিং করুন।',
     });
   };
 
