@@ -125,8 +125,6 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
   const [lookupError, setLookupError] = useState('');
   const [slipBooking, setSlipBooking] = useState<Booking | null>(null);
 
-  const [heroImgFailed, setHeroImgFailed] = useState(false);
-
   const loadTrips = useCallback(
     async (opts?: { from?: string; to?: string; date?: string; counter_id?: string }) => {
       setLoadingTrips(true);
@@ -653,126 +651,39 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
   }
 
   // --------------------------------------------------------------------------
-  // VIEW 1: HOME SCREEN (2 Clean Modern Side-by-Side Grid Cards)
+  // VIEW 1: HOME SCREEN (Clean 2-Column Square Icon Grid)
   // --------------------------------------------------------------------------
   if (passengerView === 'home') {
     return (
-      <main className="min-h-[calc(100vh-140px)] flex flex-col justify-center px-4 sm:px-6 py-10 sm:py-16">
-        <div className="max-w-4xl w-full mx-auto space-y-10">
-          {/* Clean Centered Headline */}
-          <div className="text-center space-y-3 max-w-2xl mx-auto">
-            <p className="text-xs font-semibold text-blue-700 tracking-wide">
-              {settings.organization_name}
-            </p>
-            <h1 className="font-display text-3xl sm:text-4xl lg:text-[42px] font-bold text-slate-900 leading-[1.2] tracking-tight [text-wrap:balance]">
-              আপনার যাত্রার মাধ্যম নির্বাচন করুন
-            </h1>
-            <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
-              দেশের অনুমোদিত বাস কাউন্টার থেকে সরাসরি আসন পছন্দ করে অনলাইন টিকিট কাটুন অথবা বাংলাদেশ রেলওয়ের ট্রেন টিকিট বুক করুন।
-            </p>
-          </div>
-
-          {/* 2 Clean Modern Grid Cards Side by Side */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
-            {/* Card 1: বাস টিকিট / Bus */}
+      <main className="min-h-[calc(100vh-140px)] flex items-center justify-center px-4 sm:px-6 py-10">
+        <div className="w-full max-w-md sm:max-w-lg mx-auto">
+          <div className="grid grid-cols-2 gap-4 sm:gap-6">
+            {/* Card 1: বাস টিকিট */}
             <button
               type="button"
               onClick={() => setPassengerView('bus')}
-              className="group text-left bg-white border border-slate-200 hover:border-blue-700 rounded-2xl p-6 sm:p-8 flex flex-col justify-between gap-6 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
+              className="group aspect-square bg-white border border-slate-200 hover:border-blue-700 shadow-xs hover:shadow-md rounded-2xl p-5 sm:p-6 flex flex-col items-center justify-center gap-3.5 text-center transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
             >
-              <div className="space-y-5">
-                <div className="flex items-center justify-between gap-4">
-                  <span className="w-14 h-14 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center shrink-0 group-hover:bg-blue-700 group-hover:text-white transition-colors">
-                    <Bus className="w-7 h-7" aria-hidden="true" />
-                  </span>
-                  <span className="text-xs font-medium text-slate-500 tabular-nums">
-                    {formatBanglaNumber(counters.length)}টি অনুমোদিত কাউন্টার
-                  </span>
-                </div>
-
-                {!heroImgFailed && (
-                  <div className="h-36 sm:h-40 rounded-xl overflow-hidden border border-slate-200 bg-slate-100">
-                    <img
-                      src="/src/assets/images/hero_express_coach_1794840144861.jpg"
-                      alt="এক্সপ্রেস বাস টিকিট"
-                      referrerPolicy="no-referrer"
-                      onError={() => setHeroImgFailed(true)}
-                      className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-200"
-                    />
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <h2 className="font-display text-2xl font-bold text-slate-900">
-                    বাস টিকিট / Bus
-                  </h2>
-                  <p className="text-sm text-slate-600 leading-relaxed">
-                    সিরিয়াল অনুযায়ী সকল বাস কাউন্টার ও রুট সার্চ করুন, ভিজ্যুয়াল সিট ম্যাপ থেকে আসন নির্বাচন করে অনলাইন টিকিট ডাউনলোড করুন।
-                  </p>
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-slate-100 flex items-center justify-between text-sm font-semibold text-blue-700">
-                <span>বাস কাউন্টার দেখুন ও টিকিট কাটুন</span>
-                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" aria-hidden="true" />
-              </div>
+              <span className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-blue-50 text-blue-700 flex items-center justify-center group-hover:bg-blue-700 group-hover:text-white transition-colors">
+                <Bus className="w-7 h-7 sm:w-8 sm:h-8" aria-hidden="true" />
+              </span>
+              <span className="font-display text-base sm:text-lg font-bold text-slate-900">
+                বাস টিকিট
+              </span>
             </button>
 
-            {/* Card 2: ট্রেন টিকিট / Train */}
+            {/* Card 2: ট্রেন টিকিট */}
             <button
               type="button"
               onClick={() => setPassengerView('train')}
-              className="group text-left bg-white border border-slate-200 hover:border-emerald-700 rounded-2xl p-6 sm:p-8 flex flex-col justify-between gap-6 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 focus-visible:ring-offset-2"
+              className="group aspect-square bg-white border border-slate-200 hover:border-emerald-700 shadow-xs hover:shadow-md rounded-2xl p-5 sm:p-6 flex flex-col items-center justify-center gap-3.5 text-center transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 focus-visible:ring-offset-2"
             >
-              <div className="space-y-5">
-                <div className="flex items-center justify-between gap-4">
-                  <span className="w-14 h-14 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0 group-hover:bg-emerald-700 group-hover:text-white transition-colors">
-                    <TrainFront className="w-7 h-7" aria-hidden="true" />
-                  </span>
-                  <span className="text-xs font-medium text-slate-500">
-                    বাংলাদেশ রেলওয়ে ই-টিকিট
-                  </span>
-                </div>
-
-                <div className="h-36 sm:h-40 rounded-xl border border-emerald-200/70 bg-gradient-to-br from-emerald-900 via-emerald-800 to-slate-900 text-white p-5 flex flex-col justify-between">
-                  <div className="flex items-center justify-between text-xs text-emerald-200">
-                    <span>Bangladesh Railway</span>
-                    <span className="font-mono">eticket.railway.gov.bd</span>
-                  </div>
-                  <div>
-                    <p className="font-display text-lg font-bold">অফিসিয়াল রেলওয়ে টিকিট</p>
-                    <p className="text-xs text-emerald-100/90 mt-0.5">
-                      নতুন ট্যাব ছাড়াই সরাসরি অ্যাপের ভেতর বুকিং ও ফিরে আসার সুবিধা
-                    </p>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <h2 className="font-display text-2xl font-bold text-slate-900">
-                    ট্রেন টিকিট / Train
-                  </h2>
-                  <p className="text-sm text-slate-600 leading-relaxed">
-                    অ্যাপের বর্তমান উইন্ডোতেই সরাসরি বাংলাদেশ রেলওয়ের অফিসিয়াল ই-টিকিট পোর্টালে প্রবেশ করুন ও কাজ শেষে সহজেই ফিরে আসুন।
-                  </p>
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-slate-100 flex items-center justify-between text-sm font-semibold text-emerald-700">
-                <span>রেলওয়ে ই-টিকিট খুলুন</span>
-                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" aria-hidden="true" />
-              </div>
-            </button>
-          </div>
-
-          {/* Subtle Ticket Check Shortcut */}
-          <div className="text-center pt-2">
-            <button
-              type="button"
-              onClick={() => setActivePanel('bookings')}
-              className="min-h-[44px] px-4 py-2 text-sm font-medium text-slate-600 hover:text-blue-700 inline-flex items-center gap-2 transition-colors"
-            >
-              <Ticket className="w-4 h-4" aria-hidden="true" />
-              <span>ইতিমধ্যে বুকিং করেছেন? টিকিট যাচাই ও ডাউনলোড করুন</span>
+              <span className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center group-hover:bg-emerald-700 group-hover:text-white transition-colors">
+                <TrainFront className="w-7 h-7 sm:w-8 sm:h-8" aria-hidden="true" />
+              </span>
+              <span className="font-display text-base sm:text-lg font-bold text-slate-900">
+                ট্রেন টিকিট
+              </span>
             </button>
           </div>
         </div>
