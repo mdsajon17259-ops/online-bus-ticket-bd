@@ -608,9 +608,7 @@ export async function loginWithIdentifier(
     res.user.role !== 'counter_representative'
   ) {
     setAuthToken(null);
-    throw new Error(
-      'এই লগইন শুধুমাত্র অ্যাডমিন, কাউন্টার এবং প্রতিনিধির জন্য নির্ধারিত। সাধারণ যাত্রীরা লগইন ছাড়াই সরাসরি টিকিট বুক করতে পারবেন।'
-    );
+    throw new Error('সঠিক তথ্য ও পাসওয়ার্ড দিন অথবা গেস্ট হিসেবে টিকিট কাটুন।');
   }
   setAuthToken(res.token);
   return { user: res.user };

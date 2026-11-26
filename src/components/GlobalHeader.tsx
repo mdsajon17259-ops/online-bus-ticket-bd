@@ -116,9 +116,9 @@ export function GlobalHeader() {
             <button
               type="button"
               onClick={() => handleNavigate('auth')}
-              className="inline-flex items-center justify-center px-2.5 sm:px-4 py-2 min-h-[40px] text-[11px] sm:text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded-lg transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700"
+              className="inline-flex items-center justify-center px-3.5 sm:px-4 py-2 min-h-[40px] text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded-lg transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700"
             >
-              স্টাফ / অ্যাডমিন লগইন
+              লগইন করুন
             </button>
           )}
 

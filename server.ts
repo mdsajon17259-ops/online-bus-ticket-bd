@@ -945,8 +945,8 @@ async function startServer() {
     }
 
     if (row.role !== 'counter_admin' && row.role !== 'counter_representative') {
-      res.status(403).json({
-        error: 'এই লগইন শুধুমাত্র অ্যাডমিন, কাউন্টার এবং প্রতিনিধির জন্য নির্ধারিত। সাধারণ যাত্রীরা লগইন ছাড়াই সরাসরি টিকিট বুক করতে পারবেন।',
+      res.status(401).json({
+        error: 'Invalid username or password',
       });
       return;
     }

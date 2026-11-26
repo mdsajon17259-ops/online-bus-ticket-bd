@@ -1396,7 +1396,7 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
                     {/* Right: Direct Passenger Info + Payment + Submit (No Login Required) */}
                     <div className="md:col-span-6">
                       <h3 className="font-display text-sm font-semibold text-slate-900 mb-3">
-                        ০২. যাত্রীর তথ্য ও পেমেন্ট (লগইন ছাড়াই সরাসরি বুকিং)
+                        ০২. যাত্রীর তথ্য ও পেমেন্ট (গেস্ট বুকিং)
                       </h3>
 
                       <form onSubmit={handleBookingSubmit} className="space-y-4">

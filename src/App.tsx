@@ -53,7 +53,7 @@ function AppShell() {
                 onClick={() => setActivePanel('auth')}
                 className="hover:text-slate-900 transition-colors"
               >
-                স্টাফ / অ্যাডমিন লগইন
+                লগইন করুন
               </button>
             )}
           </div>
