@@ -81,6 +81,8 @@ export interface Booking {
   boarding_point: string;
   selected_seats: string[];
   total_fare: number;
+  payment_method?: string | null;
+  trx_id?: string | null;
   status: BookingStatus;
   created_at: string;
   trip?: {

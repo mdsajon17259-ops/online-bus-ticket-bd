@@ -52,7 +52,14 @@ export function downloadTicketPng(
   organizationName: string,
   paymentMeta?: TicketPaymentMeta | null
 ): void {
-  const meta = paymentMeta ?? getTicketPaymentMeta(booking.id);
+  const storedMeta = paymentMeta ?? getTicketPaymentMeta(booking.id);
+  const meta: TicketPaymentMeta | null =
+    booking.payment_method || booking.trx_id
+      ? {
+          method: booking.payment_method || storedMeta?.method || 'অনলাইন পেমেন্ট',
+          reference: booking.trx_id || storedMeta?.reference,
+        }
+      : storedMeta;
   const width = 1080;
   const height = 740;
   const canvas = document.createElement('canvas');
@@ -106,10 +113,10 @@ export function downloadTicketPng(
   // Status Badge in Header
   const statusText =
     booking.status === 'confirmed'
-      ? 'নিশ্চিত (Confirmed)'
+      ? 'অনুমোদিত / Confirmed'
       : booking.status === 'cancelled'
-        ? 'বাতিল (Cancelled)'
-        : 'অপেক্ষমাণ (Pending)';
+        ? 'বাতিল / Cancelled'
+        : 'যাচাই চলমান / Pending';
   const statusBg =
     booking.status === 'confirmed'
       ? '#059669'
@@ -118,15 +125,15 @@ export function downloadTicketPng(
         : '#d97706';
 
   ctx.save();
-  drawRoundedRect(ctx, cardX + cardW - 260, cardY + 38, 224, 52, 12);
+  drawRoundedRect(ctx, cardX + cardW - 296, cardY + 38, 260, 52, 12);
   ctx.fillStyle = statusBg;
   ctx.fill();
   ctx.restore();
 
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 18px "Hind Siliguri", "Plus Jakarta Sans", sans-serif';
+  ctx.font = 'bold 17px "Hind Siliguri", "Plus Jakarta Sans", sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(statusText, cardX + cardW - 148, cardY + 70);
+  ctx.fillText(statusText, cardX + cardW - 166, cardY + 70);
   ctx.textAlign = 'left';
 
   // Booking Reference & Route Banner

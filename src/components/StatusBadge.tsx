@@ -7,7 +7,7 @@ export function StatusBadge({ status }: { status: BookingStatus }) {
     return (
       <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 whitespace-nowrap">
         <CheckCircle2 className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-        <span>নিশ্চিত (Confirmed)</span>
+        <span>অনুমোদিত / Confirmed</span>
       </span>
     );
   }
@@ -16,7 +16,7 @@ export function StatusBadge({ status }: { status: BookingStatus }) {
     return (
       <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-700 whitespace-nowrap">
         <XCircle className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-        <span>বাতিল (Cancelled)</span>
+        <span>বাতিল / Cancelled</span>
       </span>
     );
   }
@@ -24,7 +24,7 @@ export function StatusBadge({ status }: { status: BookingStatus }) {
   return (
     <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700 whitespace-nowrap">
       <Clock className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-      <span>অপেক্ষমাণ (Pending)</span>
+      <span>যাচাই চলমান / Pending Verification</span>
     </span>
   );
 }

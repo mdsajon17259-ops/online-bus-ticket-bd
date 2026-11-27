@@ -35,6 +35,7 @@ import {
   formatBanglaNumber,
   formatBDT,
 } from '../lib/format';
+import { getTicketPaymentMeta } from '../lib/ticketDownload';
 import { useApp } from '../context/AppContext';
 import type { Booking, BookingStatus, Counter, Seat, Trip } from '../types';
 import { AuthScreen } from './AuthScreen';
@@ -770,6 +771,9 @@ export function CounterOperatorPanel() {
                 {filteredBookings.map((b) => {
                   const isBusy = actionId === b.id;
                   const dt = b.trip ? formatBanglaDateTime(b.trip.departure_time) : null;
+                  const payMeta = getTicketPaymentMeta(b.id);
+                  const payMethod = b.payment_method?.trim() || payMeta?.method || '';
+                  const payTrx = b.trx_id?.trim() || payMeta?.reference || '';
                   return (
                     <div key={b.id} className="p-4 space-y-3">
                       <div className="flex items-start justify-between gap-2">
@@ -797,6 +801,17 @@ export function CounterOperatorPanel() {
                         </div>
                       )}
 
+                      {(payMethod || payTrx) && (
+                        <div className="text-xs bg-blue-50/70 border border-blue-100 rounded-lg px-2.5 py-2 flex flex-wrap items-center justify-between gap-2">
+                          <span className="font-medium text-slate-700">{payMethod || 'পেমেন্ট'}</span>
+                          {payTrx && (
+                            <span className="font-mono font-semibold text-blue-800">
+                              TrxID: {payTrx}
+                            </span>
+                          )}
+                        </div>
+                      )}
+
                       <div className="flex items-center justify-between text-xs pt-1">
                         <div>
                           <span className="text-slate-500">সিট: </span>
@@ -818,7 +833,7 @@ export function CounterOperatorPanel() {
                             className="flex-1 min-h-[44px] px-3 py-2 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 rounded-lg inline-flex items-center justify-center gap-1"
                           >
                             <Check className="w-3.5 h-3.5" aria-hidden="true" />
-                            <span>নিশ্চিত করুন</span>
+                            <span>অনুমোদন করুন (Approve)</span>
                           </button>
                         )}
                         {b.status !== 'cancelled' && (
@@ -829,7 +844,7 @@ export function CounterOperatorPanel() {
                             className="flex-1 min-h-[44px] px-3 py-2 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 disabled:opacity-50 rounded-lg inline-flex items-center justify-center gap-1"
                           >
                             <X className="w-3.5 h-3.5" aria-hidden="true" />
-                            <span>বাতিল ও সিট ছাড়ুন</span>
+                            <span>বাতিল করুন (Cancel)</span>
                           </button>
                         )}
                         <button
@@ -854,6 +869,7 @@ export function CounterOperatorPanel() {
                       <th className="py-3 px-4">বুকিং আইডি</th>
                       <th className="py-3 px-4">যাত্রীর তথ্য</th>
                       <th className="py-3 px-4">রুট ও সময়</th>
+                      <th className="py-3 px-4">পেমেন্ট ও TrxID</th>
                       <th className="py-3 px-4">আসন</th>
                       <th className="py-3 px-4 text-right">মোট ভাড়া</th>
                       <th className="py-3 px-4">অবস্থা</th>
@@ -864,6 +880,9 @@ export function CounterOperatorPanel() {
                     {filteredBookings.map((b) => {
                       const isBusy = actionId === b.id;
                       const dt = b.trip ? formatBanglaDateTime(b.trip.departure_time) : null;
+                      const payMeta = getTicketPaymentMeta(b.id);
+                      const payMethod = b.payment_method?.trim() || payMeta?.method || '';
+                      const payTrx = b.trx_id?.trim() || payMeta?.reference || '';
                       return (
                         <tr key={b.id} className="hover:bg-slate-50/70 transition-colors">
                           <td className="py-3 px-4 font-mono text-xs font-semibold text-slate-900 tabular-nums whitespace-nowrap">
@@ -889,6 +908,22 @@ export function CounterOperatorPanel() {
                               </>
                             )}
                           </td>
+                          <td className="py-3 px-4">
+                            {payMethod || payTrx ? (
+                              <div className="space-y-0.5">
+                                <div className="text-xs font-medium text-slate-800">
+                                  {payMethod || 'পেমেন্ট'}
+                                </div>
+                                {payTrx && (
+                                  <div className="text-xs font-mono font-semibold text-blue-700">
+                                    {payTrx}
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-slate-400">—</span>
+                            )}
+                          </td>
                           <td className="py-3 px-4 font-mono text-xs font-semibold text-slate-800 tabular-nums">
                             {b.selected_seats.join(', ')}
                           </td>
@@ -908,7 +943,7 @@ export function CounterOperatorPanel() {
                                   className="min-h-[36px] px-3 py-1.5 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 rounded-md inline-flex items-center gap-1 transition-colors"
                                 >
                                   <Check className="w-3.5 h-3.5" aria-hidden="true" />
-                                  <span>নিশ্চিত করুন</span>
+                                  <span>অনুমোদন করুন (Approve)</span>
                                 </button>
                               )}
                               {b.status !== 'cancelled' && (
@@ -919,7 +954,7 @@ export function CounterOperatorPanel() {
                                   className="min-h-[36px] px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 disabled:opacity-50 rounded-md inline-flex items-center gap-1 transition-colors"
                                 >
                                   <X className="w-3.5 h-3.5" aria-hidden="true" />
-                                  <span>বাতিল</span>
+                                  <span>বাতিল করুন (Cancel)</span>
                                 </button>
                               )}
                               <button
@@ -1092,7 +1127,11 @@ export function CounterOperatorPanel() {
                         </button>
                       </div>
 
-                      {inspectedBooking ? (
+                      {inspectedBooking ? (() => {
+                        const inspMeta = getTicketPaymentMeta(inspectedBooking.id);
+                        const inspMethod = inspectedBooking.payment_method?.trim() || inspMeta?.method || '';
+                        const inspTrx = inspectedBooking.trx_id?.trim() || inspMeta?.reference || '';
+                        return (
                         <div className="space-y-3">
                           <div className="flex flex-wrap items-center justify-between gap-2 text-xs bg-slate-50 rounded-lg p-3">
                             <div>
@@ -1103,6 +1142,19 @@ export function CounterOperatorPanel() {
                                 সিট: <strong className="font-mono">{inspectedBooking.selected_seats.join(', ')}</strong> · ভাড়া:{' '}
                                 <strong className="font-mono text-blue-700">{formatBDT(inspectedBooking.total_fare)}</strong>
                               </p>
+                              {(inspMethod || inspTrx) && (
+                                <p className="text-slate-600 mt-0.5">
+                                  পেমেন্ট: <strong>{inspMethod || 'পেমেন্ট'}</strong>
+                                  {inspTrx ? (
+                                    <>
+                                      {' · '}
+                                      <strong className="font-mono text-blue-700">
+                                        TrxID: {inspTrx}
+                                      </strong>
+                                    </>
+                                  ) : null}
+                                </p>
+                              )}
                             </div>
                             <StatusBadge status={inspectedBooking.status} />
                           </div>
@@ -1116,7 +1168,7 @@ export function CounterOperatorPanel() {
                                 className="min-h-[42px] px-3.5 py-2 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 rounded-lg inline-flex items-center gap-1.5"
                               >
                                 <Check className="w-3.5 h-3.5" aria-hidden="true" />
-                                <span>যাচাই ও নিশ্চিত করুন</span>
+                                <span>অনুমোদন করুন (Approve)</span>
                               </button>
                             )}
                             {inspectedBooking.status !== 'cancelled' && (
@@ -1127,7 +1179,7 @@ export function CounterOperatorPanel() {
                                 className="min-h-[42px] px-3.5 py-2 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 disabled:opacity-50 rounded-lg inline-flex items-center gap-1.5"
                               >
                                 <X className="w-3.5 h-3.5" aria-hidden="true" />
-                                <span>বাতিল ও সিট ছাড়ুন</span>
+                                <span>বাতিল করুন (Cancel)</span>
                               </button>
                             )}
                             <button
@@ -1140,7 +1192,8 @@ export function CounterOperatorPanel() {
                             </button>
                           </div>
                         </div>
-                      ) : (
+                        );
+                      })() : (
                         <div className="flex items-center justify-between gap-3 pt-1">
                           <p className="text-xs text-slate-600">
                             এই সিটের বিপরীতে কোনো অনলাইন/যাত্রী বুকিং রেকর্ড নেই।

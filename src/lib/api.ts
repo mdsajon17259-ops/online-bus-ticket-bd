@@ -473,16 +473,40 @@ export async function createBooking(payload: {
   phone: string;
   boarding_point: string;
   selected_seats: string[];
+  payment_method?: string;
+  trx_id?: string;
 }): Promise<Booking> {
   await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
-    const { data, error } = await supabase.rpc('submit_booking', {
+    let { data, error } = await supabase.rpc('submit_booking', {
       p_trip_id: payload.trip_id,
       p_passenger_name: payload.passenger_name,
       p_phone: payload.phone,
       p_boarding_point: payload.boarding_point,
       p_selected_seats: payload.selected_seats,
+      p_payment_method: payload.payment_method || '',
+      p_trx_id: payload.trx_id || '',
     });
+
+    if (error) {
+      const errMsg = extractErrorMessage(error, '').toLowerCase();
+      if (
+        errMsg.includes('could not find the function') ||
+        errMsg.includes('pgrst202') ||
+        errMsg.includes('42883')
+      ) {
+        const retry = await supabase.rpc('submit_booking', {
+          p_trip_id: payload.trip_id,
+          p_passenger_name: payload.passenger_name,
+          p_phone: payload.phone,
+          p_boarding_point: payload.boarding_point,
+          p_selected_seats: payload.selected_seats,
+        });
+        data = retry.data;
+        error = retry.error;
+      }
+    }
+
     if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
     const rawBooking = data as Booking;
     if (!rawBooking.trip && rawBooking.id) {
@@ -492,10 +516,19 @@ export async function createBooking(payload: {
         .eq('id', rawBooking.id)
         .maybeSingle();
       if (fullRow) {
-        return mapSupabaseBooking(fullRow as Record<string, unknown>);
+        const mapped = mapSupabaseBooking(fullRow as Record<string, unknown>);
+        return {
+          ...mapped,
+          payment_method: mapped.payment_method || payload.payment_method || '',
+          trx_id: mapped.trx_id || payload.trx_id || '',
+        };
       }
     }
-    return rawBooking;
+    return {
+      ...rawBooking,
+      payment_method: rawBooking.payment_method || payload.payment_method || '',
+      trx_id: rawBooking.trx_id || payload.trx_id || '',
+    };
   }
   return apiFetch<Booking>('/api/bookings', {
     method: 'POST',
@@ -1285,6 +1318,8 @@ function mapSupabaseBooking(row: Record<string, unknown>): Booking {
       ? row.selected_seats.map(String)
       : [],
     total_fare: Number(row.total_fare),
+    payment_method: row.payment_method ? String(row.payment_method) : '',
+    trx_id: row.trx_id ? String(row.trx_id) : '',
     status: row.status as BookingStatus,
     created_at: String(row.created_at),
     trip: trip

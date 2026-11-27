@@ -94,6 +94,8 @@ db.exec(`
     boarding_point TEXT NOT NULL DEFAULT '',
     selected_seats TEXT NOT NULL,
     total_fare REAL NOT NULL,
+    payment_method TEXT NOT NULL DEFAULT '',
+    trx_id TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'cancelled')),
     created_at TEXT NOT NULL
   );
@@ -148,6 +150,12 @@ if (profilesSchemaRow?.sql && !profilesSchemaRow.sql.includes('counter_represent
 const bookingCols = db.prepare('PRAGMA table_info(bookings)').all() as Array<{ name: string }>;
 if (!bookingCols.some((c) => c.name === 'user_id')) {
   db.exec('ALTER TABLE bookings ADD COLUMN user_id TEXT DEFAULT NULL');
+}
+if (!bookingCols.some((c) => c.name === 'payment_method')) {
+  db.exec("ALTER TABLE bookings ADD COLUMN payment_method TEXT NOT NULL DEFAULT ''");
+}
+if (!bookingCols.some((c) => c.name === 'trx_id')) {
+  db.exec("ALTER TABLE bookings ADD COLUMN trx_id TEXT NOT NULL DEFAULT ''");
 }
 
 function hashPassword(password: string): string {
@@ -700,12 +708,22 @@ async function startServer() {
   });
 
   app.post('/api/bookings', (req: AuthedRequest, res) => {
-    const { trip_id, passenger_name, phone, boarding_point, selected_seats } = req.body as {
+    const {
+      trip_id,
+      passenger_name,
+      phone,
+      boarding_point,
+      selected_seats,
+      payment_method,
+      trx_id,
+    } = req.body as {
       trip_id?: string;
       passenger_name?: string;
       phone?: string;
       boarding_point?: string;
       selected_seats?: string[];
+      payment_method?: string;
+      trx_id?: string;
     };
 
     if (!trip_id || !passenger_name?.trim() || !phone?.trim() || !Array.isArray(selected_seats) || selected_seats.length === 0) {
@@ -745,9 +763,11 @@ async function startServer() {
         const totalFare = trip.price * selected_seats.length;
         const now = new Date().toISOString();
         const actorUserId = req.user?.id || null;
+        const cleanMethod = (payment_method || '').trim();
+        const cleanTrxId = (trx_id || '').trim();
 
         db.prepare(
-          'INSERT INTO bookings (id, trip_id, user_id, passenger_name, phone, boarding_point, selected_seats, total_fare, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+          'INSERT INTO bookings (id, trip_id, user_id, passenger_name, phone, boarding_point, selected_seats, total_fare, payment_method, trx_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         ).run(
           bookingId,
           trip_id,
@@ -757,6 +777,8 @@ async function startServer() {
           (boarding_point || '').trim(),
           JSON.stringify(selected_seats),
           totalFare,
+          cleanMethod,
+          cleanTrxId,
           'pending',
           now
         );
@@ -770,6 +792,8 @@ async function startServer() {
           boarding_point: (boarding_point || '').trim(),
           selected_seats,
           total_fare: totalFare,
+          payment_method: cleanMethod,
+          trx_id: cleanTrxId,
           status: 'pending',
           created_at: now,
           trip: {
@@ -826,6 +850,8 @@ async function startServer() {
         boarding_point: r.boarding_point,
         selected_seats: JSON.parse(String(r.selected_seats)),
         total_fare: r.total_fare,
+        payment_method: String(r.payment_method || ''),
+        trx_id: String(r.trx_id || ''),
         status: r.status,
         created_at: r.created_at,
         trip: {
@@ -1064,6 +1090,8 @@ async function startServer() {
         boarding_point: r.boarding_point,
         selected_seats: JSON.parse(String(r.selected_seats)),
         total_fare: r.total_fare,
+        payment_method: String(r.payment_method || ''),
+        trx_id: String(r.trx_id || ''),
         status: r.status,
         created_at: r.created_at,
         trip: {

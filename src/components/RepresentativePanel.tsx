@@ -8,6 +8,7 @@ import {
   isMasterSuperAdminProfile,
 } from '../lib/api';
 import { formatBanglaDateTime, formatBanglaNumber, formatBDT } from '../lib/format';
+import { getTicketPaymentMeta } from '../lib/ticketDownload';
 import { useApp } from '../context/AppContext';
 import type { Booking, BookingStatus, Seat, Trip } from '../types';
 import { AuthScreen } from './AuthScreen';
@@ -345,6 +346,9 @@ export function RepresentativePanel() {
               <div className="md:hidden divide-y divide-slate-200">
                 {filteredBookings.map((b) => {
                   const dt = b.trip ? formatBanglaDateTime(b.trip.departure_time) : null;
+                  const payMeta = getTicketPaymentMeta(b.id);
+                  const payMethod = b.payment_method?.trim() || payMeta?.method || '';
+                  const payTrx = b.trx_id?.trim() || payMeta?.reference || '';
                   return (
                     <div key={b.id} className="p-4 space-y-2.5">
                       <div className="flex items-start justify-between gap-2">
@@ -369,6 +373,17 @@ export function RepresentativePanel() {
                             {dt ? `${dt.date} · ${dt.time}` : b.trip.departure_time} ·{' '}
                             {b.boarding_point || 'প্রধান কাউন্টার'}
                           </p>
+                        </div>
+                      )}
+
+                      {(payMethod || payTrx) && (
+                        <div className="text-xs bg-blue-50/70 border border-blue-100 rounded-lg px-2.5 py-2 flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-slate-600">{payMethod || 'পেমেন্ট'}</span>
+                          {payTrx && (
+                            <span className="font-mono font-semibold text-slate-900">
+                              TrxID: {payTrx}
+                            </span>
+                          )}
                         </div>
                       )}
 
@@ -410,6 +425,7 @@ export function RepresentativePanel() {
                       <th className="py-3 px-4">বুকিং আইডি</th>
                       <th className="py-3 px-4">যাত্রীর তথ্য</th>
                       <th className="py-3 px-4">রুট ও সময়</th>
+                      <th className="py-3 px-4">পেমেন্ট ও TrxID</th>
                       <th className="py-3 px-4">আসন ও সংখ্যা</th>
                       <th className="py-3 px-4 text-right">মোট ভাড়া</th>
                       <th className="py-3 px-4">অবস্থা</th>
@@ -419,6 +435,9 @@ export function RepresentativePanel() {
                   <tbody className="divide-y divide-slate-100 text-sm">
                     {filteredBookings.map((b) => {
                       const dt = b.trip ? formatBanglaDateTime(b.trip.departure_time) : null;
+                      const payMeta = getTicketPaymentMeta(b.id);
+                      const payMethod = b.payment_method?.trim() || payMeta?.method || '';
+                      const payTrx = b.trx_id?.trim() || payMeta?.reference || '';
                       return (
                         <tr key={b.id} className="hover:bg-slate-50/70 transition-colors">
                           <td className="py-3 px-4 font-mono text-xs font-semibold text-slate-900 tabular-nums whitespace-nowrap">
@@ -442,6 +461,22 @@ export function RepresentativePanel() {
                                   {b.boarding_point || 'প্রধান কাউন্টার'}
                                 </div>
                               </>
+                            )}
+                          </td>
+                          <td className="py-3 px-4">
+                            {payMethod || payTrx ? (
+                              <div className="space-y-0.5">
+                                <div className="text-xs font-medium text-slate-800">
+                                  {payMethod || 'পেমেন্ট'}
+                                </div>
+                                {payTrx && (
+                                  <div className="text-xs font-mono font-semibold text-blue-700">
+                                    {payTrx}
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-slate-400">—</span>
                             )}
                           </td>
                           <td className="py-3 px-4">

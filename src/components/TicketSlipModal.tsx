@@ -24,7 +24,12 @@ export function TicketSlipModal({
 }: TicketSlipModalProps) {
   const tripDt = booking.trip ? formatBanglaDateTime(booking.trip.departure_time) : null;
   const createdDt = formatBanglaDateTime(booking.created_at);
-  const paymentMeta = getTicketPaymentMeta(booking.id);
+  const fallbackMeta = getTicketPaymentMeta(booking.id);
+  const resolvedMethod = booking.payment_method?.trim() || fallbackMeta?.method || '';
+  const resolvedTrxId = booking.trx_id?.trim() || fallbackMeta?.reference || '';
+  const paymentMeta = resolvedMethod
+    ? { method: resolvedMethod, reference: resolvedTrxId || undefined }
+    : null;
 
   return (
     <div
@@ -110,10 +115,19 @@ export function TicketSlipModal({
               </div>
               {paymentMeta && (
                 <div className="sm:col-span-2">
-                  <dt className="text-slate-500">পেমেন্ট বিবরণ</dt>
+                  <dt className="text-slate-500">পেমেন্ট মাধ্যম ও TrxID</dt>
                   <dd className="font-medium text-slate-800 mt-0.5">
                     {paymentMeta.method}
-                    {paymentMeta.reference ? ` (${paymentMeta.reference})` : ''}
+                    {paymentMeta.reference ? (
+                      <>
+                        {' · '}
+                        <span className="font-mono font-semibold text-slate-900">
+                          TrxID: {paymentMeta.reference}
+                        </span>
+                      </>
+                    ) : (
+                      ''
+                    )}
                   </dd>
                 </div>
               )}
@@ -149,7 +163,7 @@ export function TicketSlipModal({
                 className="min-h-[44px] px-4 py-2 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 rounded-lg inline-flex items-center gap-1.5"
               >
                 <Check className="w-4 h-4" aria-hidden="true" />
-                <span>যাচাই ও নিশ্চিত করুন</span>
+                <span>অনুমোদন করুন (Approve)</span>
               </button>
             )}
             {onCancelRelease && booking.status !== 'cancelled' && (
@@ -160,7 +174,7 @@ export function TicketSlipModal({
                 className="min-h-[44px] px-4 py-2 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 disabled:opacity-50 rounded-lg inline-flex items-center gap-1.5"
               >
                 <X className="w-4 h-4" aria-hidden="true" />
-                <span>বাতিল ও সিট ছাড়ুন</span>
+                <span>বাতিল করুন (Cancel)</span>
               </button>
             )}
           </div>

@@ -147,11 +147,15 @@ create table if not exists public.bookings (
   boarding_point text not null default '',
   selected_seats text[] not null,
   total_fare numeric(10, 2) not null,
+  payment_method text not null default '',
+  trx_id text not null default '',
   status text not null default 'pending' check (status in ('pending', 'confirmed', 'cancelled')),
   created_at timestamptz not null default now()
 );
 
 alter table public.bookings add column if not exists user_id uuid references auth.users(id) on delete set null;
+alter table public.bookings add column if not exists payment_method text not null default '';
+alter table public.bookings add column if not exists trx_id text not null default '';
 
 -- 9. PASSWORD RESET AUDIT LOGS TABLE
 create table if not exists public.password_reset_logs (
@@ -234,12 +238,16 @@ for each row
 execute function public.handle_new_auth_user();
 
 -- Atomic passenger booking submission (supports direct guest booking without login)
+drop function if exists public.submit_booking(uuid, text, text, text, text[]);
+drop function if exists public.submit_booking(uuid, text, text, text, text[], text, text);
 create or replace function public.submit_booking(
   p_trip_id uuid,
   p_passenger_name text,
   p_phone text,
   p_boarding_point text,
-  p_selected_seats text[]
+  p_selected_seats text[],
+  p_payment_method text default '',
+  p_trx_id text default ''
 )
 returns public.bookings
 language plpgsql
@@ -248,10 +256,19 @@ set search_path = public
 as $$
 declare
   v_price numeric;
-  v_avail_count integer;
+  v_seats text[];
+  v_updated_count integer;
   v_booking public.bookings;
 begin
-  if coalesce(trim(p_passenger_name), '') = '' or coalesce(trim(p_phone), '') = '' or coalesce(array_length(p_selected_seats, 1), 0) = 0 then
+  select array_agg(distinct s order by s)
+  into v_seats
+  from (
+    select trim(x) as s
+    from unnest(coalesce(p_selected_seats, array[]::text[])) as x
+    where trim(x) <> ''
+  ) sub;
+
+  if coalesce(trim(p_passenger_name), '') = '' or coalesce(trim(p_phone), '') = '' or coalesce(array_length(v_seats, 1), 0) = 0 then
     raise exception 'যাত্রীর নাম, মোবাইল নম্বর এবং কমপক্ষে একটি আসন প্রয়োজন';
   end if;
 
@@ -260,27 +277,39 @@ begin
     raise exception 'Trip not found';
   end if;
 
-  select count(*) into v_avail_count
+  -- Lock only the specific target seat rows first (no aggregate functions with FOR UPDATE)
+  perform 1
   from public.seats
   where trip_id = p_trip_id
-    and seat_number = any(p_selected_seats)
-    and status = 'available'
+    and seat_number = any(v_seats)
+  order by seat_number
   for update;
 
-  if v_avail_count <> array_length(p_selected_seats, 1) then
-    raise exception 'নির্বাচিত এক বা একাধিক আসন আর খালি নেই';
-  end if;
-
+  -- Atomically mark requested available seats as booked and verify exact row count
   update public.seats
   set status = 'booked'
   where trip_id = p_trip_id
-    and seat_number = any(p_selected_seats);
+    and seat_number = any(v_seats)
+    and status = 'available';
+
+  get diagnostics v_updated_count = row_count;
+  if v_updated_count <> array_length(v_seats, 1) then
+    raise exception 'নির্বাচিত এক বা একাধিক আসন আর খালি নেই';
+  end if;
 
   insert into public.bookings (
-    trip_id, user_id, passenger_name, phone, boarding_point, selected_seats, total_fare, status
+    trip_id, user_id, passenger_name, phone, boarding_point, selected_seats, total_fare, payment_method, trx_id, status
   ) values (
-    p_trip_id, auth.uid(), trim(p_passenger_name), trim(p_phone), coalesce(trim(p_boarding_point), ''), p_selected_seats,
-    v_price * array_length(p_selected_seats, 1), 'pending'
+    p_trip_id,
+    auth.uid(),
+    trim(p_passenger_name),
+    trim(p_phone),
+    coalesce(trim(p_boarding_point), ''),
+    v_seats,
+    v_price * array_length(v_seats, 1),
+    coalesce(trim(p_payment_method), ''),
+    coalesce(trim(p_trx_id), ''),
+    'pending'
   )
   returning * into v_booking;
 
@@ -288,7 +317,7 @@ begin
 end;
 $$;
 
-grant execute on function public.submit_booking(uuid, text, text, text, text[]) to anon, authenticated;
+grant execute on function public.submit_booking(uuid, text, text, text, text[], text, text) to anon, authenticated;
 
 -- =============================================================================
 -- CUSTOM DATABASE AUTHENTICATION & RBAC RPCs (Zero Email / Zero SignUp)
@@ -1247,7 +1276,8 @@ declare
   v_staff public.staff_accounts;
   v_trip public.trips;
   v_counter_name text;
-  v_avail_count integer;
+  v_seats text[];
+  v_updated_count integer;
   v_fare numeric;
   v_booking public.bookings;
   v_final_status text := coalesce(nullif(trim(p_status), ''), 'confirmed');
@@ -1261,7 +1291,15 @@ begin
     raise exception 'অবৈধ বুকিং স্ট্যাটাস';
   end if;
 
-  if coalesce(trim(p_passenger_name), '') = '' or coalesce(trim(p_phone), '') = '' or coalesce(array_length(p_selected_seats, 1), 0) = 0 then
+  select array_agg(distinct s order by s)
+  into v_seats
+  from (
+    select trim(x) as s
+    from unnest(coalesce(p_selected_seats, array[]::text[])) as x
+    where trim(x) <> ''
+  ) sub;
+
+  if coalesce(trim(p_passenger_name), '') = '' or coalesce(trim(p_phone), '') = '' or coalesce(array_length(v_seats, 1), 0) = 0 then
     raise exception 'যাত্রীর নাম, মোবাইল নম্বর এবং কমপক্ষে একটি আসন প্রয়োজন';
   end if;
 
@@ -1276,23 +1314,27 @@ begin
 
   select counter_name into v_counter_name from public.counters where id = v_trip.counter_id;
 
-  select count(*) into v_avail_count
+  -- Lock only the specific target seat rows first (no aggregate functions with FOR UPDATE)
+  perform 1
   from public.seats
   where trip_id = p_trip_id
-    and seat_number = any(p_selected_seats)
-    and status = 'available'
+    and seat_number = any(v_seats)
+  order by seat_number
   for update;
 
-  if v_avail_count <> array_length(p_selected_seats, 1) then
-    raise exception 'নির্বাচিত এক বা একাধিক আসন আর খালি নেই';
-  end if;
-
+  -- Atomically mark requested available seats as booked and verify exact row count
   update public.seats
   set status = 'booked'
   where trip_id = p_trip_id
-    and seat_number = any(p_selected_seats);
+    and seat_number = any(v_seats)
+    and status = 'available';
 
-  v_fare := coalesce(p_total_fare, v_trip.price * array_length(p_selected_seats, 1));
+  get diagnostics v_updated_count = row_count;
+  if v_updated_count <> array_length(v_seats, 1) then
+    raise exception 'নির্বাচিত এক বা একাধিক আসন আর খালি নেই';
+  end if;
+
+  v_fare := coalesce(p_total_fare, v_trip.price * array_length(v_seats, 1));
   if v_fare < 0 then
     raise exception 'ভাড়ার পরিমাণ সঠিক নয়';
   end if;
@@ -1305,7 +1347,7 @@ begin
     trim(p_passenger_name),
     trim(p_phone),
     coalesce(nullif(trim(p_boarding_point), ''), coalesce(v_counter_name, 'প্রধান কাউন্টার')),
-    p_selected_seats,
+    v_seats,
     v_fare,
     v_final_status
   )
