@@ -91,6 +91,7 @@ export interface Booking {
     departure_time: string;
     bus_type: string;
     price: number;
+    total_seats?: number;
     counter_id: string;
     counter_name: string;
     counter_phone?: string;
