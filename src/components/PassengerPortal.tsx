@@ -6,6 +6,7 @@ import {
   Calendar,
   Check,
   CheckCircle2,
+  Clock,
   Copy,
   CreditCard,
   Download,
@@ -35,6 +36,7 @@ import {
   formatBanglaDateTime,
   formatBanglaNumber,
   formatBDT,
+  formatShortTicketId,
 } from '../lib/format';
 import {
   downloadTicketPng,
@@ -111,6 +113,7 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
   const [bookingError, setBookingError] = useState('');
   const [confirmedReceipt, setConfirmedReceipt] = useState<Booking | null>(null);
   const [confirmedPaymentMeta, setConfirmedPaymentMeta] = useState<TicketPaymentMeta | null>(null);
+  const [refreshingReceipt, setRefreshingReceipt] = useState(false);
 
   // Booking lookup state
   const [lookupQuery, setLookupQuery] = useState('');
@@ -381,15 +384,21 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
         ...rawBooking,
         payment_method: rawBooking.payment_method || paymentMethod,
         trx_id: rawBooking.trx_id || finalTrxId,
-        trip: rawBooking.trip || {
-          route_from: activeTrip.route_from,
-          route_to: activeTrip.route_to,
-          departure_time: activeTrip.departure_time,
-          bus_type: activeTrip.bus_type,
-          price: activeTrip.price,
-          counter_id: activeTrip.counter_id,
-          counter_name: activeTrip.counter_name || modalCounter?.counter_name || 'কাউন্টার',
-        },
+        trip: rawBooking.trip
+          ? {
+              ...rawBooking.trip,
+              counter_phone: rawBooking.trip.counter_phone || modalCounter?.phone || '',
+            }
+          : {
+              route_from: activeTrip.route_from,
+              route_to: activeTrip.route_to,
+              departure_time: activeTrip.departure_time,
+              bus_type: activeTrip.bus_type,
+              price: activeTrip.price,
+              counter_id: activeTrip.counter_id,
+              counter_name: activeTrip.counter_name || modalCounter?.counter_name || 'কাউন্টার',
+              counter_phone: modalCounter?.phone || '',
+            },
       };
 
       const payMeta: TicketPaymentMeta = {
@@ -400,12 +409,6 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
       setConfirmedPaymentMeta(payMeta);
       setConfirmedReceipt(booking);
       setSelectedSeats([]);
-
-      try {
-        downloadTicketPng(booking, settings.organization_name, payMeta);
-      } catch {
-        // Manual download button remains immediately available on screen
-      }
 
       const [freshSeats, freshAllTrips] = await Promise.all([
         fetchTripSeats(activeTrip.id),
@@ -418,6 +421,37 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
       setBookingError(extractErrorMessage(err, 'বুকিং অনুরোধ পাঠানো যায়নি'));
     } finally {
       setSubmittingBooking(false);
+    }
+  };
+
+  const getCounterPhoneForBooking = useCallback(
+    (b: Booking | null): string => {
+      if (!b) return modalCounter?.phone?.trim() || '01711-004422';
+      const fromTrip = b.trip?.counter_phone?.trim();
+      if (fromTrip) return fromTrip;
+      const matchedCounter = counters.find((c) => c.id === b.trip?.counter_id);
+      if (matchedCounter?.phone?.trim()) return matchedCounter.phone.trim();
+      return modalCounter?.phone?.trim() || '01711-004422';
+    },
+    [counters, modalCounter]
+  );
+
+  const handleRefreshReceiptStatus = async () => {
+    if (!confirmedReceipt) return;
+    setRefreshingReceipt(true);
+    try {
+      const results = await lookupBookings(confirmedReceipt.id);
+      const updated = results.find((r) => r.id === confirmedReceipt.id);
+      if (updated) {
+        setConfirmedReceipt({
+          ...updated,
+          trip: updated.trip || confirmedReceipt.trip,
+        });
+      }
+    } catch {
+      // Keep current receipt if refresh fails transiently
+    } finally {
+      setRefreshingReceipt(false);
     }
   };
 
@@ -444,77 +478,111 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
     const effectivePayMeta = resolvedMethod
       ? { method: resolvedMethod, reference: resolvedTrxId || undefined }
       : null;
+    const shortId = formatShortTicketId(b.id);
+    const counterPhone = getCounterPhoneForBooking(b);
+    const telHref = `tel:${counterPhone.replace(/[^0-9+]/g, '') || counterPhone}`;
 
     return (
       <div
         key={b.id}
-        className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+        className="bg-white border border-slate-200 rounded-xl p-5 space-y-4"
       >
-        <div className="space-y-1.5">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <span className="font-mono text-sm font-semibold text-slate-900 tabular-nums">
-              {b.id}
-            </span>
-            <span className="text-slate-300" aria-hidden="true">·</span>
-            <StatusBadge status={b.status} />
-          </div>
-          {b.trip && (
-            <p className="font-display text-lg font-semibold text-slate-900">
-              {b.trip.route_from} থেকে {b.trip.route_to}
-            </p>
-          )}
-          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-slate-600">
-            <span>{b.passenger_name}</span>
-            <span aria-hidden="true">·</span>
-            <span className="font-mono tabular-nums">{b.phone}</span>
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+          <div className="space-y-2 min-w-0 flex-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pb-2.5 border-b border-dashed border-slate-200">
+              <div className="min-w-0">
+                <span className="text-[11px] text-slate-500 block">টিকিট / বুকিং আইডি</span>
+                <span className="font-mono text-sm font-bold text-slate-900 tabular-nums break-words">
+                  {shortId}
+                </span>
+              </div>
+              <div className="min-w-0">
+                <span className="text-[11px] text-slate-500 block">কাউন্টার ও বাসের ধরন</span>
+                <span className="text-xs font-semibold text-blue-700 break-words">
+                  {b.trip ? `${b.trip.counter_name} · ${b.trip.bus_type}` : 'নির্ধারিত কাউন্টার'}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2.5">
+              <StatusBadge status={b.status} />
+            </div>
+
             {b.trip && (
-              <>
-                <span aria-hidden="true">·</span>
-                <span>{b.trip.counter_name}</span>
-                <span aria-hidden="true">·</span>
-                <span className="tabular-nums">{dt.date} · {dt.time}</span>
-              </>
+              <p className="font-display text-lg font-semibold text-slate-900">
+                {b.trip.route_from} থেকে {b.trip.route_to}
+              </p>
             )}
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-slate-600">
+              <span>{b.passenger_name}</span>
+              <span aria-hidden="true">·</span>
+              <span className="font-mono tabular-nums">{b.phone}</span>
+              {b.trip && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span className="tabular-nums">{dt.date} · {dt.time}</span>
+                </>
+              )}
+            </div>
+            <p className="text-xs text-slate-500 break-words">
+              বোর্ডিং পয়েন্ট: {b.boarding_point || 'প্রধান কাউন্টার'}
+              {effectivePayMeta
+                ? ` · পেমেন্ট: ${effectivePayMeta.method}${
+                    effectivePayMeta.reference ? ` (TrxID: ${effectivePayMeta.reference})` : ''
+                  }`
+                : ''}
+            </p>
           </div>
-          <p className="text-xs text-slate-500">
-            বোর্ডিং পয়েন্ট: {b.boarding_point || 'প্রধান কাউন্টার'}
-            {effectivePayMeta
-              ? ` · পেমেন্ট: ${effectivePayMeta.method}${
-                  effectivePayMeta.reference ? ` (TrxID: ${effectivePayMeta.reference})` : ''
-                }`
-              : ''}
-          </p>
+
+          <div className="sm:text-right border-t sm:border-t-0 pt-3 sm:pt-0 border-slate-100 shrink-0 space-y-2">
+            <div>
+              <p className="text-xs text-slate-500">আসন নম্বর</p>
+              <p className="font-mono text-sm font-semibold text-slate-900 tabular-nums">
+                {b.selected_seats.join(', ')}
+              </p>
+              <p className="font-mono text-lg font-bold text-slate-900 tabular-nums mt-0.5">
+                {formatBDT(b.total_fare)}
+              </p>
+            </div>
+            <div className="flex flex-wrap sm:justify-end gap-2">
+              {b.status === 'confirmed' ? (
+                <button
+                  type="button"
+                  onClick={() => downloadTicketPng(b, settings.organization_name, effectivePayMeta)}
+                  className="min-h-[42px] px-3.5 py-1.5 text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded-lg inline-flex items-center gap-1.5"
+                >
+                  <Download className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>টিকিট ডাউনলোড করুন (Download Ticket)</span>
+                </button>
+              ) : b.status === 'pending' ? (
+                <a
+                  href={telHref}
+                  className="min-h-[42px] px-3.5 py-1.5 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg inline-flex items-center gap-1.5"
+                >
+                  <Phone className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>কল নাও (Call Now) · {counterPhone}</span>
+                </a>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setSlipBooking(b)}
+                className="min-h-[42px] px-3 py-1.5 text-xs font-semibold text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-lg inline-flex items-center gap-1.5"
+              >
+                <FileText className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>টিকিট স্লিপ</span>
+              </button>
+            </div>
+          </div>
         </div>
 
-        <div className="sm:text-right border-t sm:border-t-0 pt-3 sm:pt-0 border-slate-100 shrink-0 space-y-2">
-          <div>
-            <p className="text-xs text-slate-500">আসন নম্বর</p>
-            <p className="font-mono text-sm font-semibold text-slate-900 tabular-nums">
-              {b.selected_seats.join(', ')}
-            </p>
-            <p className="font-mono text-lg font-bold text-slate-900 tabular-nums mt-0.5">
-              {formatBDT(b.total_fare)}
-            </p>
+        {b.status === 'pending' && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg px-3.5 py-2.5 flex items-start gap-2 text-xs text-amber-900">
+            <Clock className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" aria-hidden="true" />
+            <span>
+              কাউন্টার থেকে পেমেন্ট যাচাইয়ের পর টিকিট ডাউনলোড অপশন চালু হবে।
+            </span>
           </div>
-          <div className="flex flex-wrap sm:justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => downloadTicketPng(b, settings.organization_name, effectivePayMeta)}
-              className="min-h-[42px] px-3.5 py-1.5 text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded-lg inline-flex items-center gap-1.5"
-            >
-              <Download className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>টিকিট ডাউনলোড করুন</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setSlipBooking(b)}
-              className="min-h-[42px] px-3 py-1.5 text-xs font-semibold text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-lg inline-flex items-center gap-1.5"
-            >
-              <FileText className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>টিকিট স্লিপ</span>
-            </button>
-          </div>
-        </div>
+        )}
       </div>
     );
   };
@@ -621,6 +689,8 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
             booking={slipBooking}
             organizationName={settings.organization_name}
             onClose={() => setSlipBooking(null)}
+            hideDownloadWhenPending
+            fallbackCounterPhone={getCounterPhoneForBooking(slipBooking)}
           />
         )}
       </main>
@@ -1264,49 +1334,73 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
                     ফিরে যান
                   </button>
                 </div>
-              ) : confirmedReceipt ? (
-                /* Instant Digital Ticket & Download View */
+              ) : confirmedReceipt ? (() => {
+                const shortReceiptId = formatShortTicketId(confirmedReceipt.id);
+                const receiptCounterPhone = getCounterPhoneForBooking(confirmedReceipt);
+                const receiptTelHref = `tel:${receiptCounterPhone.replace(/[^0-9+]/g, '') || receiptCounterPhone}`;
+                const isApproved = confirmedReceipt.status === 'confirmed';
+                const isCancelled = confirmedReceipt.status === 'cancelled';
+
+                return (
+                /* Digital Ticket Status & Approval-Gated Download View */
                 <div className="max-w-lg mx-auto py-2 space-y-5">
                   <div className="flex items-start gap-3">
-                    <CheckCircle2 className="w-7 h-7 text-emerald-600 shrink-0 mt-0.5" />
+                    {isApproved ? (
+                      <CheckCircle2 className="w-7 h-7 text-emerald-600 shrink-0 mt-0.5" />
+                    ) : (
+                      <Clock className="w-7 h-7 text-amber-600 shrink-0 mt-0.5" />
+                    )}
                     <div>
                       <h3 className="font-display text-xl font-bold text-slate-900">
-                        ডিজিটাল টিকিট প্রস্তুত হয়েছে
+                        {isApproved
+                          ? 'আপনার টিকিট অনুমোদিত হয়েছে'
+                          : isCancelled
+                            ? 'বুকিং বাতিল করা হয়েছে'
+                            : 'বুকিং অনুরোধ সফলভাবে জমা হয়েছে'}
                       </h3>
                       <p className="text-sm text-slate-600 mt-1">
-                        আপনার পেমেন্ট ও TrxID কাউন্টার মাস্টারের কাছে যাচাইয়ের জন্য পাঠানো হয়েছে। নিচে থেকে আপনার টিকিট সংরক্ষণ বা ডাউনলোড করুন।
+                        {isApproved
+                          ? 'কাউন্টার থেকে পেমেন্ট যাচাই সম্পন্ন হয়েছে। নিচে থেকে আপনার ই-টিকিট ডাউনলোড করুন।'
+                          : 'আপনার পেমেন্ট ও TrxID কাউন্টার মাস্টারের কাছে পাঠানো হয়েছে। কাউন্টার অনুমোদন করলেই টিকিট ডাউনলোড অপশন চালু হবে।'}
                       </p>
                     </div>
                   </div>
 
-                  {/* Clean Printable/Downloadable Digital Ticket Card */}
+                  {/* Clean Non-Overlapping E-Ticket Card */}
                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-3.5 text-sm">
-                    <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-dashed border-slate-300">
-                      <div>
-                        <span className="text-[11px] text-slate-500 block">Ticket ID / PNR</span>
-                        <span className="font-mono text-base font-bold text-slate-900 tabular-nums">
-                          {confirmedReceipt.id}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pb-3 border-b border-dashed border-slate-300">
+                      <div className="min-w-0">
+                        <span className="text-[11px] text-slate-500 block">টিকিট / বুকিং আইডি</span>
+                        <span className="font-mono text-base font-bold text-slate-900 tabular-nums mt-0.5 block break-words">
+                          {shortReceiptId}
                         </span>
                       </div>
+                      <div className="min-w-0 sm:text-right">
+                        <span className="text-[11px] text-slate-500 block">কাউন্টার ও বাসের ধরন</span>
+                        <span className="text-xs font-semibold text-blue-700 mt-0.5 block break-words">
+                          {confirmedReceipt.trip?.counter_name || activeTrip.counter_name} · {activeTrip.bus_type}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-dashed border-slate-300">
+                      <span className="text-xs text-slate-500">বুকিং অবস্থা</span>
                       <StatusBadge status={confirmedReceipt.status} />
                     </div>
 
                     <div className="pb-2 border-b border-dashed border-slate-300">
-                      <p className="text-xs font-semibold text-blue-700">
-                        {confirmedReceipt.trip?.counter_name || activeTrip.counter_name}
-                      </p>
-                      <p className="font-display text-base font-bold text-slate-900 mt-0.5">
+                      <p className="font-display text-base font-bold text-slate-900">
                         {activeTrip.route_from} → {activeTrip.route_to}
                       </p>
                       <p className="text-xs text-slate-600 tabular-nums mt-0.5">
                         {formatBanglaDateTime(activeTrip.departure_time).date} ·{' '}
-                        {formatBanglaDateTime(activeTrip.departure_time).time} · {activeTrip.bus_type}
+                        {formatBanglaDateTime(activeTrip.departure_time).time}
                       </p>
                     </div>
 
                     <div className="flex justify-between gap-3">
                       <span className="text-slate-500">যাত্রীর নাম</span>
-                      <span className="font-semibold text-slate-900 text-right">
+                      <span className="font-semibold text-slate-900 text-right break-words">
                         {confirmedReceipt.passenger_name}
                       </span>
                     </div>
@@ -1318,7 +1412,7 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
                     </div>
                     <div className="flex justify-between gap-3">
                       <span className="text-slate-500">বোর্ডিং পয়েন্ট</span>
-                      <span className="text-slate-900 text-right">
+                      <span className="text-slate-900 text-right break-words">
                         {confirmedReceipt.boarding_point}
                       </span>
                     </div>
@@ -1330,7 +1424,7 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
                     </div>
                     <div className="flex justify-between gap-3">
                       <span className="text-slate-500">পেমেন্ট মাধ্যম ও TrxID</span>
-                      <span className="text-slate-900 text-right">
+                      <span className="text-slate-900 text-right break-words">
                         {confirmedReceipt.payment_method || confirmedPaymentMeta?.method}
                         {confirmedReceipt.trx_id || confirmedPaymentMeta?.reference ? (
                           <span className="font-mono font-semibold text-blue-700 block sm:inline sm:ml-1.5">
@@ -1347,67 +1441,109 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
                     </div>
                   </div>
 
-                  <div className="space-y-2.5">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        downloadTicketPng(
-                          confirmedReceipt,
-                          settings.organization_name,
-                          confirmedPaymentMeta
-                        )
-                      }
-                      className="w-full min-h-[48px] px-5 py-3 text-sm font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded-xl inline-flex items-center justify-center gap-2 transition-colors"
-                    >
-                      <Download className="w-4 h-4" aria-hidden="true" />
-                      <span>টিকিট ডাউনলোড করুন (Download Ticket)</span>
-                    </button>
-
-                    <div className="flex flex-wrap items-center justify-between gap-2">
+                  {isApproved ? (
+                    <div className="space-y-2.5">
                       <button
                         type="button"
-                        onClick={() => window.print()}
-                        className="min-h-[44px] px-4 py-2 text-xs font-semibold text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-lg inline-flex items-center gap-1.5 transition-colors"
+                        onClick={() =>
+                          downloadTicketPng(
+                            confirmedReceipt,
+                            settings.organization_name,
+                            confirmedPaymentMeta
+                          )
+                        }
+                        className="w-full min-h-[48px] px-5 py-3 text-sm font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded-xl inline-flex items-center justify-center gap-2 transition-colors"
                       >
-                        <Printer className="w-4 h-4" aria-hidden="true" />
-                        <span>প্রিন্ট করুন</span>
+                        <Download className="w-4 h-4" aria-hidden="true" />
+                        <span>টিকিট ডাউনলোড করুন (Download Ticket)</span>
                       </button>
 
-                      <div className="flex items-center gap-2 ml-auto">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
                         <button
                           type="button"
-                          onClick={async () => {
-                            const idToCheck = confirmedReceipt.id;
-                            setLookupQuery(idToCheck);
-                            closeBookingModal();
-                            setActivePanel('bookings');
-                            setLookupLoading(true);
-                            setLookupError('');
-                            try {
-                              const found = await lookupBookings(idToCheck);
-                              setLookupResults(found);
-                            } catch (err) {
-                              setLookupError(extractErrorMessage(err, 'টিকেট খোঁজা সম্ভব হয়নি'));
-                            } finally {
-                              setLookupLoading(false);
-                            }
-                          }}
-                          className="min-h-[44px] px-4 py-2 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+                          onClick={() => window.print()}
+                          className="min-h-[44px] px-4 py-2 text-xs font-semibold text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-lg inline-flex items-center gap-1.5 transition-colors"
                         >
-                          টিকিট যাচাই-এ দেখুন
+                          <Printer className="w-4 h-4" aria-hidden="true" />
+                          <span>প্রিন্ট করুন</span>
                         </button>
+
                         <button
                           type="button"
                           onClick={closeBookingModal}
-                          className="min-h-[44px] px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors"
+                          className="min-h-[44px] px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors ml-auto"
                         >
                           সম্পন্ন
                         </button>
                       </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {!isCancelled && (
+                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
+                          <p className="text-xs font-medium text-amber-900 leading-relaxed">
+                            কাউন্টার থেকে পেমেন্ট যাচাইয়ের পর টিকিট ডাউনলোড অপশন চালু হবে। অনুমোদনে দেরি হলে সরাসরি কাউন্টারে কল করুন।
+                          </p>
+                          <a
+                            href={receiptTelHref}
+                            className="w-full min-h-[48px] px-5 py-3 text-sm font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-xl inline-flex items-center justify-center gap-2 transition-colors"
+                          >
+                            <Phone className="w-4 h-4" aria-hidden="true" />
+                            <span>কল নাও (Call Now) · {receiptCounterPhone}</span>
+                          </a>
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        {!isCancelled && (
+                          <button
+                            type="button"
+                            disabled={refreshingReceipt}
+                            onClick={handleRefreshReceiptStatus}
+                            className="min-h-[44px] px-3.5 py-2 text-xs font-semibold text-slate-800 bg-slate-100 hover:bg-slate-200 disabled:opacity-60 rounded-lg inline-flex items-center gap-1.5 transition-colors"
+                          >
+                            <RefreshCw className={`w-3.5 h-3.5 ${refreshingReceipt ? 'animate-spin' : ''}`} aria-hidden="true" />
+                            <span>{refreshingReceipt ? 'যাচাই হচ্ছে...' : 'স্ট্যাটাস রিফ্রেশ'}</span>
+                          </button>
+                        )}
+
+                        <div className="flex items-center gap-2 ml-auto">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const idToCheck = confirmedReceipt.id;
+                              setLookupQuery(shortReceiptId);
+                              closeBookingModal();
+                              setActivePanel('bookings');
+                              setLookupLoading(true);
+                              setLookupError('');
+                              try {
+                                const found = await lookupBookings(idToCheck);
+                                setLookupResults(found);
+                              } catch (err) {
+                                setLookupError(extractErrorMessage(err, 'টিকেট খোঁজা সম্ভব হয়নি'));
+                              } finally {
+                                setLookupLoading(false);
+                              }
+                            }}
+                            className="min-h-[44px] px-4 py-2 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+                          >
+                            টিকিট যাচাই-এ দেখুন
+                          </button>
+                          <button
+                            type="button"
+                            onClick={closeBookingModal}
+                            className="min-h-[44px] px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors"
+                          >
+                            সম্পন্ন
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              ) : (
+                );
+              })() : (
                 <div className="space-y-5">
                   {/* Counter Trip Selector when counter has multiple trips */}
                   {modalTrips.length > 1 && (

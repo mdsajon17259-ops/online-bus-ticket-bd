@@ -512,7 +512,7 @@ export async function createBooking(payload: {
     if (!rawBooking.trip && rawBooking.id) {
       const { data: fullRow } = await supabase
         .from('bookings')
-        .select('*, trips(route_from, route_to, departure_time, bus_type, price, counter_id, counters(counter_name))')
+        .select('*, trips(route_from, route_to, departure_time, bus_type, price, counter_id, counters(counter_name, phone))')
         .eq('id', rawBooking.id)
         .maybeSingle();
       if (fullRow) {
@@ -546,7 +546,7 @@ export async function fetchMyBookings(): Promise<Booking[]> {
       if (staffPhone) {
         const { data, error } = await supabase
           .from('bookings')
-          .select('*, trips(route_from, route_to, departure_time, bus_type, price, counter_id, counters(counter_name))')
+          .select('*, trips(route_from, route_to, departure_time, bus_type, price, counter_id, counters(counter_name, phone))')
           .eq('phone', staffPhone)
           .order('created_at', { ascending: false });
         if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
@@ -564,7 +564,7 @@ export async function fetchMyBookings(): Promise<Booking[]> {
 
     let query = supabase
       .from('bookings')
-      .select('*, trips(route_from, route_to, departure_time, bus_type, price, counter_id, counters(counter_name))')
+      .select('*, trips(route_from, route_to, departure_time, bus_type, price, counter_id, counters(counter_name, phone))')
       .order('created_at', { ascending: false });
 
     const phone = (profile?.phone as string | undefined)?.trim();
@@ -585,11 +585,29 @@ export async function lookupBookings(query: string): Promise<Booking[]> {
   await ensureSupabaseClient();
   if (isSupabaseConfigured && supabase) {
     const clean = query.trim();
-    const { data, error } = await supabase
+    if (!clean) return [];
+    const noHash = clean.replace(/^#/, '').trim();
+    const isFullUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(noHash);
+    const isShortHex = /^[0-9a-f]{8}$/i.test(noHash);
+
+    let builder = supabase
       .from('bookings')
-      .select('*, trips(route_from, route_to, departure_time, bus_type, price, counter_id, counters(counter_name))')
-      .or(`phone.ilike.%${clean}%,id.eq.${clean}`)
+      .select('*, trips(route_from, route_to, departure_time, bus_type, price, counter_id, counters(counter_name, phone))')
       .order('created_at', { ascending: false });
+
+    if (isFullUuid) {
+      builder = builder.or(`phone.ilike.%${clean}%,id.eq.${noHash.toLowerCase()}`);
+    } else if (isShortHex) {
+      const hex = noHash.toLowerCase();
+      builder = builder.or(
+        `phone.ilike.%${clean}%,and(id.gte.${hex}-0000-0000-0000-000000000000,id.lte.${hex}-ffff-ffff-ffff-ffffffffffff)`
+      );
+    } else {
+      const digitsOnly = clean.replace(/[\s-]/g, '');
+      builder = builder.ilike('phone', `%${digitsOnly}%`);
+    }
+
+    const { data, error } = await builder;
     if (error) throw new Error(extractErrorMessage(error, 'তথ্য প্রক্রিয়া করা যায়নি'));
     return (data || []).map(mapSupabaseBooking);
   }
@@ -1304,7 +1322,7 @@ function mapSupabaseBooking(row: Record<string, unknown>): Booking {
     bus_type?: string;
     price?: number;
     counter_id?: string;
-    counters?: { counter_name?: string } | null;
+    counters?: { counter_name?: string; phone?: string } | null;
   } | null;
 
   return {
@@ -1331,6 +1349,7 @@ function mapSupabaseBooking(row: Record<string, unknown>): Booking {
           price: Number(trip.price || 0),
           counter_id: trip.counter_id || '',
           counter_name: trip.counters?.counter_name || 'কাউন্টার',
+          counter_phone: trip.counters?.phone || '',
         }
       : undefined,
   };

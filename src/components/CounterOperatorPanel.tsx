@@ -34,6 +34,7 @@ import {
   formatBanglaDateTime,
   formatBanglaNumber,
   formatBDT,
+  formatShortTicketId,
 } from '../lib/format';
 import { getTicketPaymentMeta } from '../lib/ticketDownload';
 import { useApp } from '../context/AppContext';
@@ -778,8 +779,8 @@ export function CounterOperatorPanel() {
                     <div key={b.id} className="p-4 space-y-3">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <span className="font-mono text-xs font-bold text-slate-900 tabular-nums">
-                            {b.id}
+                          <span className="font-mono text-xs font-bold text-slate-900 tabular-nums" title={b.id}>
+                            {formatShortTicketId(b.id)}
                           </span>
                           <p className="font-semibold text-slate-900 text-sm mt-0.5 truncate">
                             {b.passenger_name}
@@ -885,8 +886,8 @@ export function CounterOperatorPanel() {
                       const payTrx = b.trx_id?.trim() || payMeta?.reference || '';
                       return (
                         <tr key={b.id} className="hover:bg-slate-50/70 transition-colors">
-                          <td className="py-3 px-4 font-mono text-xs font-semibold text-slate-900 tabular-nums whitespace-nowrap">
-                            {b.id}
+                          <td className="py-3 px-4 font-mono text-xs font-semibold text-slate-900 tabular-nums whitespace-nowrap" title={b.id}>
+                            {formatShortTicketId(b.id)}
                           </td>
                           <td className="py-3 px-4">
                             <div className="font-medium text-slate-900">{b.passenger_name}</div>
@@ -1136,7 +1137,7 @@ export function CounterOperatorPanel() {
                           <div className="flex flex-wrap items-center justify-between gap-2 text-xs bg-slate-50 rounded-lg p-3">
                             <div>
                               <p className="text-slate-500">
-                                আইডি: <strong className="font-mono text-slate-900">{inspectedBooking.id}</strong>
+                                আইডি: <strong className="font-mono text-slate-900" title={inspectedBooking.id}>{formatShortTicketId(inspectedBooking.id)}</strong>
                               </p>
                               <p className="text-slate-600 mt-0.5">
                                 সিট: <strong className="font-mono">{inspectedBooking.selected_seats.join(', ')}</strong> · ভাড়া:{' '}

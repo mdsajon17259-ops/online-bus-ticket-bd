@@ -7,7 +7,7 @@ import {
   fetchTripSeats,
   isMasterSuperAdminProfile,
 } from '../lib/api';
-import { formatBanglaDateTime, formatBanglaNumber, formatBDT } from '../lib/format';
+import { formatBanglaDateTime, formatBanglaNumber, formatBDT, formatShortTicketId } from '../lib/format';
 import { getTicketPaymentMeta } from '../lib/ticketDownload';
 import { useApp } from '../context/AppContext';
 import type { Booking, BookingStatus, Seat, Trip } from '../types';
@@ -353,8 +353,8 @@ export function RepresentativePanel() {
                     <div key={b.id} className="p-4 space-y-2.5">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <span className="font-mono text-xs font-bold text-slate-900 tabular-nums">
-                            {b.id}
+                          <span className="font-mono text-xs font-bold text-slate-900 tabular-nums" title={b.id}>
+                            {formatShortTicketId(b.id)}
                           </span>
                           <p className="font-semibold text-slate-900 text-sm mt-0.5 truncate">
                             {b.passenger_name}
@@ -440,8 +440,8 @@ export function RepresentativePanel() {
                       const payTrx = b.trx_id?.trim() || payMeta?.reference || '';
                       return (
                         <tr key={b.id} className="hover:bg-slate-50/70 transition-colors">
-                          <td className="py-3 px-4 font-mono text-xs font-semibold text-slate-900 tabular-nums whitespace-nowrap">
-                            {b.id}
+                          <td className="py-3 px-4 font-mono text-xs font-semibold text-slate-900 tabular-nums whitespace-nowrap" title={b.id}>
+                            {formatShortTicketId(b.id)}
                           </td>
                           <td className="py-3 px-4">
                             <div className="font-medium text-slate-900">{b.passenger_name}</div>

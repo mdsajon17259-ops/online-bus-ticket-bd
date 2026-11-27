@@ -93,6 +93,7 @@ export interface Booking {
     price: number;
     counter_id: string;
     counter_name: string;
+    counter_phone?: string;
   };
 }
 

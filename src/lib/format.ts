@@ -32,3 +32,16 @@ export const BANGLADESH_DISTRICTS = [
   'বগুড়া',
   'যশোর',
 ];
+
+export function formatShortTicketId(id?: string | null): string {
+  const clean = (id || '').trim();
+  if (!clean) return '—';
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(clean)) {
+    return `#${clean.slice(0, 8).toUpperCase()}`;
+  }
+  const withoutHash = clean.startsWith('#') ? clean.slice(1) : clean;
+  if (withoutHash.length > 14) {
+    return `#${withoutHash.replace(/-/g, '').slice(0, 8).toUpperCase()}`;
+  }
+  return `#${withoutHash.toUpperCase()}`;
+}

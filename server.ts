@@ -734,8 +734,8 @@ async function startServer() {
     try {
       const created = db.transaction(() => {
         const trip = db
-          .prepare('SELECT t.*, c.counter_name FROM trips t JOIN counters c ON c.id = t.counter_id WHERE t.id = ?')
-          .get(trip_id) as { id: string; price: number; route_from: string; route_to: string; departure_time: string; bus_type: string; counter_id: string; counter_name: string } | undefined;
+          .prepare('SELECT t.*, c.counter_name, c.phone AS counter_phone FROM trips t JOIN counters c ON c.id = t.counter_id WHERE t.id = ?')
+          .get(trip_id) as { id: string; price: number; route_from: string; route_to: string; departure_time: string; bus_type: string; counter_id: string; counter_name: string; counter_phone?: string } | undefined;
 
         if (!trip) {
           throw new Error('TRIP_NOT_FOUND');
@@ -804,6 +804,7 @@ async function startServer() {
             price: trip.price,
             counter_id: trip.counter_id,
             counter_name: trip.counter_name,
+            counter_phone: trip.counter_phone || '',
           },
         };
       })();
@@ -824,22 +825,26 @@ async function startServer() {
   });
 
   app.get('/api/bookings/lookup', (req, res) => {
-    const query = typeof req.query.q === 'string' ? req.query.q.trim() : '';
-    if (!query) {
+    const rawQuery = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    if (!rawQuery) {
       res.json([]);
       return;
     }
+    const cleanId = rawQuery.replace(/^#/, '').trim();
+    const idPrefixPattern = cleanId.length >= 4 ? `${cleanId}%` : cleanId;
 
     const rows = db
       .prepare(`
-        SELECT b.*, t.route_from, t.route_to, t.departure_time, t.bus_type, t.price, t.counter_id, c.counter_name
+        SELECT b.*, t.route_from, t.route_to, t.departure_time, t.bus_type, t.price, t.counter_id, c.counter_name, c.phone AS counter_phone
         FROM bookings b
         JOIN trips t ON t.id = b.trip_id
         JOIN counters c ON c.id = t.counter_id
-        WHERE LOWER(b.id) = LOWER(?) OR replace(replace(b.phone, '-', ''), ' ', '') LIKE ?
+        WHERE LOWER(b.id) = LOWER(?)
+          OR LOWER(b.id) LIKE LOWER(?)
+          OR replace(replace(b.phone, '-', ''), ' ', '') LIKE ?
         ORDER BY b.created_at DESC
       `)
-      .all(query, `%${query.replace(/[\s-]/g, '')}%`) as Array<Record<string, unknown>>;
+      .all(cleanId, idPrefixPattern, `%${rawQuery.replace(/[\s#-]/g, '')}%`) as Array<Record<string, unknown>>;
 
     res.json(
       rows.map((r) => ({
@@ -862,6 +867,7 @@ async function startServer() {
           price: r.price,
           counter_id: r.counter_id,
           counter_name: r.counter_name,
+          counter_phone: String(r.counter_phone || ''),
         },
       }))
     );
@@ -875,7 +881,7 @@ async function startServer() {
     const cleanPhone = (profile?.phone || '').replace(/[\s-]/g, '');
     const rows = db
       .prepare(`
-        SELECT b.*, t.route_from, t.route_to, t.departure_time, t.bus_type, t.price, t.counter_id, c.counter_name
+        SELECT b.*, t.route_from, t.route_to, t.departure_time, t.bus_type, t.price, t.counter_id, c.counter_name, c.phone AS counter_phone
         FROM bookings b
         JOIN trips t ON t.id = b.trip_id
         JOIN counters c ON c.id = t.counter_id
@@ -894,6 +900,8 @@ async function startServer() {
         boarding_point: r.boarding_point,
         selected_seats: JSON.parse(String(r.selected_seats)),
         total_fare: r.total_fare,
+        payment_method: String(r.payment_method || ''),
+        trx_id: String(r.trx_id || ''),
         status: r.status,
         created_at: r.created_at,
         trip: {
@@ -904,6 +912,7 @@ async function startServer() {
           price: r.price,
           counter_id: r.counter_id,
           counter_name: r.counter_name,
+          counter_phone: String(r.counter_phone || ''),
         },
       }))
     );

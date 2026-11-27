@@ -1,4 +1,4 @@
-import { formatBanglaDateTime, formatBanglaNumber, formatBDT } from './format';
+import { formatBanglaDateTime, formatBanglaNumber, formatBDT, formatShortTicketId } from './format';
 import type { Booking } from '../types';
 
 export interface TicketPaymentMeta {
@@ -45,6 +45,25 @@ function drawRoundedRect(
   ctx.arcTo(x, y + h, x, y, r);
   ctx.arcTo(x, y, x + w, y, r);
   ctx.closePath();
+}
+
+function drawFittedText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number
+) {
+  const safe = text || '';
+  if (ctx.measureText(safe).width <= maxWidth) {
+    ctx.fillText(safe, x, y);
+    return;
+  }
+  let truncated = safe;
+  while (truncated.length > 1 && ctx.measureText(`${truncated}…`).width > maxWidth) {
+    truncated = truncated.slice(0, -1);
+  }
+  ctx.fillText(`${truncated}…`, x, y);
 }
 
 export function downloadTicketPng(
@@ -136,30 +155,34 @@ export function downloadTicketPng(
   ctx.fillText(statusText, cardX + cardW - 166, cardY + 70);
   ctx.textAlign = 'left';
 
-  // Booking Reference & Route Banner
+  // Booking Reference & Route Banner (Short PNR ID + non-overlapping Counter/Bus Type)
   const bodyX = cardX + 36;
+  const contentWidth = cardW - 72;
+  const rightColX = bodyX + 310;
+  const rightColWidth = contentWidth - 310;
+  const shortTicketId = formatShortTicketId(booking.id);
   let y = cardY + 184;
 
   ctx.fillStyle = '#64748b';
   ctx.font = '600 15px "Hind Siliguri", sans-serif';
   ctx.fillText('টিকিট / বুকিং আইডি', bodyX, y);
-  ctx.fillText('কাউন্টার ও বাসের ধরন', bodyX + 360, y);
+  ctx.fillText('কাউন্টার ও বাসের ধরন', rightColX, y);
 
-  y += 30;
+  y += 32;
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 26px "JetBrains Mono", monospace';
-  ctx.fillText(booking.id, bodyX, y);
+  drawFittedText(ctx, shortTicketId, bodyX, y, 280);
 
-  ctx.font = 'bold 22px "Hind Siliguri", sans-serif';
+  ctx.font = 'bold 21px "Hind Siliguri", sans-serif';
   const counterLabel = booking.trip
     ? `${booking.trip.counter_name} · ${booking.trip.bus_type}`
     : 'নির্ধারিত কাউন্টার';
-  ctx.fillText(counterLabel, bodyX + 360, y);
+  drawFittedText(ctx, counterLabel, rightColX, y, rightColWidth);
 
   // Route & Time Box
   y += 30;
   ctx.save();
-  drawRoundedRect(ctx, bodyX, y, cardW - 72, 92, 14);
+  drawRoundedRect(ctx, bodyX, y, contentWidth, 92, 14);
   ctx.fillStyle = '#f8fafc';
   ctx.fill();
   ctx.lineWidth = 1.5;
@@ -173,16 +196,16 @@ export function downloadTicketPng(
   const routeTitle = booking.trip
     ? `${booking.trip.route_from}  →  ${booking.trip.route_to}`
     : 'যাত্রার রুট';
-  ctx.fillText(routeTitle, bodyX + 24, y + 40);
+  drawFittedText(ctx, routeTitle, bodyX + 24, y + 40, contentWidth - 48);
 
   ctx.fillStyle = '#475569';
   ctx.font = '500 18px "Hind Siliguri", sans-serif';
   const timeSubtitle = tripDt
     ? `যাত্রার তারিখ ও সময়: ${tripDt.date} · ${tripDt.time}`
     : 'সময়সূচি কাউন্টার অনুযায়ী';
-  ctx.fillText(timeSubtitle, bodyX + 24, y + 72);
+  drawFittedText(ctx, timeSubtitle, bodyX + 24, y + 72, contentWidth - 48);
 
-  // Two-column Details Grid
+  // Three-column Details Grid
   y += 132;
   const col1 = bodyX;
   const col2 = bodyX + 340;
@@ -197,36 +220,36 @@ export function downloadTicketPng(
   y += 28;
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 21px "Hind Siliguri", sans-serif';
-  ctx.fillText(booking.passenger_name, col1, y);
+  drawFittedText(ctx, booking.passenger_name, col1, y, 315);
   ctx.font = 'bold 21px "JetBrains Mono", monospace';
-  ctx.fillText(booking.phone, col2, y);
+  drawFittedText(ctx, booking.phone, col2, y, 315);
   ctx.font = '600 19px "Hind Siliguri", sans-serif';
-  ctx.fillText((booking.boarding_point || 'প্রধান কাউন্টার').slice(0, 26), col3, y);
+  drawFittedText(ctx, booking.boarding_point || 'প্রধান কাউন্টার', col3, y, contentWidth - 680);
 
   // Seats, Payment & Fare Row
   y += 58;
   ctx.fillStyle = '#64748b';
   ctx.font = '600 15px "Hind Siliguri", sans-serif';
   ctx.fillText(`নির্বাচিত আসন (${formatBanglaNumber(booking.selected_seats.length)}টি)`, col1, y);
-  ctx.fillText('পেমেন্ট মাধ্যম', col2, y);
+  ctx.fillText('পেমেন্ট মাধ্যম ও TrxID', col2, y);
   ctx.fillText('মোট ভাড়া', col3, y);
 
   y += 32;
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 24px "JetBrains Mono", monospace';
-  ctx.fillText(booking.selected_seats.join(', '), col1, y);
+  drawFittedText(ctx, booking.selected_seats.join(', '), col1, y, 315);
 
-  ctx.font = '600 19px "Hind Siliguri", sans-serif';
+  ctx.font = '600 18px "Hind Siliguri", sans-serif';
   const paymentLabel = meta
     ? meta.reference
       ? `${meta.method} (${meta.reference})`
       : meta.method
     : 'কাউন্টার / অনলাইন পেমেন্ট';
-  ctx.fillText(paymentLabel.slice(0, 28), col2, y);
+  drawFittedText(ctx, paymentLabel, col2, y, 315);
 
   ctx.fillStyle = '#1d4ed8';
   ctx.font = 'bold 28px "JetBrains Mono", "Hind Siliguri", sans-serif';
-  ctx.fillText(formatBDT(booking.total_fare), col3, y);
+  drawFittedText(ctx, formatBDT(booking.total_fare), col3, y, contentWidth - 680);
 
   // Dashed divider & Footer Note
   y += 46;
@@ -243,17 +266,19 @@ export function downloadTicketPng(
   const createdDt = formatBanglaDateTime(booking.created_at);
   ctx.fillStyle = '#475569';
   ctx.font = '500 15px "Hind Siliguri", sans-serif';
-  ctx.fillText(
+  drawFittedText(
+    ctx,
     `টিকিট ইস্যু: ${createdDt.date} · ${createdDt.time}  |  যাত্রার অন্তত ২০ মিনিট পূর্বে কাউন্টারে উপস্থিত থাকুন।`,
     bodyX,
-    y + 36
+    y + 36,
+    contentWidth
   );
 
   // Trigger clean file download
   const dataUrl = canvas.toDataURL('image/png');
   const link = document.createElement('a');
   link.href = dataUrl;
-  link.download = `Desh-Travels-Ticket-${booking.id}.png`;
+  link.download = `Desh-Travels-Ticket-${shortTicketId.replace('#', '')}.png`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
