@@ -1,3 +1,4 @@
+import { buildApiCandidateUrls } from './api';
 import {
   formatBanglaDateTime,
   formatBanglaNumber,
@@ -134,40 +135,117 @@ function drawSteeringWheelIcon(ctx: CanvasRenderingContext2D, cx: number, cy: nu
   ctx.restore();
 }
 
-function triggerDirectPngDownload(canvas: HTMLCanvasElement, filename: string) {
-  const triggerLink = (href: string, revokeAfter: boolean) => {
-    const link = document.createElement('a');
-    link.href = href;
-    link.download = filename;
-    link.rel = 'noopener';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    if (revokeAfter) {
-      window.setTimeout(() => URL.revokeObjectURL(href), 10000);
-    }
-  };
-
-  if (typeof canvas.toBlob === 'function') {
-    canvas.toBlob((blob) => {
-      if (blob) {
-        const objectUrl = URL.createObjectURL(blob);
-        triggerLink(objectUrl, true);
-      } else {
-        triggerLink(canvas.toDataURL('image/png'), false);
-      }
-    }, 'image/png');
-    return;
+function clickDownloadAnchor(href: string, filename: string, revokeAfter = false): void {
+  const link = document.createElement('a');
+  link.href = href;
+  link.download = filename;
+  link.rel = 'noopener';
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  if (revokeAfter) {
+    window.setTimeout(() => URL.revokeObjectURL(href), 15000);
   }
-
-  triggerLink(canvas.toDataURL('image/png'), false);
 }
 
-function renderAndDownloadTicket(
+async function resolveHttpAttachmentDownloadUrl(
+  imageDataUrl: string,
+  filename: string
+): Promise<string | null> {
+  const candidates = buildApiCandidateUrls('/api/tickets/export-png').filter((url) =>
+    /^https?:\/\//i.test(url) || url.startsWith('/')
+  );
+
+  for (const candidateUrl of candidates) {
+    try {
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timer = controller ? window.setTimeout(() => controller.abort(), 4000) : null;
+
+      const response = await fetch(candidateUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({ imageDataUrl, filename }),
+        signal: controller?.signal,
+      });
+
+      if (timer !== null) window.clearTimeout(timer);
+
+      if (!response.ok) continue;
+
+      const data = (await response.json().catch(() => null)) as {
+        downloadPath?: string;
+      } | null;
+
+      if (data?.downloadPath) {
+        const base = candidateUrl.startsWith('http')
+          ? candidateUrl
+          : window.location.origin;
+        return new URL(data.downloadPath, base).toString();
+      }
+    } catch {
+      // Try next candidate URL or fall back to local blob download
+    }
+  }
+
+  return null;
+}
+
+async function triggerDirectPngDownload(
+  canvas: HTMLCanvasElement,
+  filename: string
+): Promise<boolean> {
+  let dataUrl = '';
+  try {
+    dataUrl = canvas.toDataURL('image/png');
+  } catch {
+    dataUrl = '';
+  }
+
+  // 1. Primary WebView & Browser Path: Serve PNG over a real HTTP(S) URL with
+  // Content-Disposition: attachment so Android WebView's DownloadManager saves
+  // directly to Downloads / Gallery instead of opening the "Share 1 photo" picker.
+  if (dataUrl.startsWith('data:image/png;base64,')) {
+    const httpDownloadUrl = await resolveHttpAttachmentDownloadUrl(dataUrl, filename);
+    if (httpDownloadUrl) {
+      clickDownloadAnchor(httpDownloadUrl, filename, false);
+      return true;
+    }
+  }
+
+  // 2. Clean Direct Fallback (never invokes navigator.share)
+  if (typeof canvas.toBlob === 'function') {
+    const blob = await new Promise<Blob | null>((resolve) => {
+      try {
+        canvas.toBlob((result) => resolve(result), 'image/png');
+      } catch {
+        resolve(null);
+      }
+    });
+
+    if (blob) {
+      const objectUrl = URL.createObjectURL(blob);
+      clickDownloadAnchor(objectUrl, filename, true);
+      return true;
+    }
+  }
+
+  if (dataUrl) {
+    clickDownloadAnchor(dataUrl, filename, false);
+    return true;
+  }
+
+  return false;
+}
+
+async function renderAndDownloadTicket(
   booking: Booking,
   organizationName: string,
   paymentMeta?: TicketPaymentMeta | null
-) {
+): Promise<boolean> {
   const storedMeta = paymentMeta ?? getTicketPaymentMeta(booking.id);
   const meta: TicketPaymentMeta | null =
     booking.payment_method || booking.trx_id
@@ -187,7 +265,7 @@ function renderAndDownloadTicket(
   const ctx = canvas.getContext('2d');
   if (!ctx) {
     window.print();
-    return;
+    return false;
   }
 
   ctx.scale(exportScale, exportScale);
@@ -666,23 +744,20 @@ function renderAndDownloadTicket(
   ctx.textAlign = 'left';
 
   const cleanId = shortTicketId.replace('#', '').toLowerCase();
-  triggerDirectPngDownload(canvas, `desh-travels-ticket-${cleanId}.png`);
+  return triggerDirectPngDownload(canvas, `desh-travels-ticket-${cleanId}.png`);
 }
 
-export function downloadTicketPng(
+export async function downloadTicketPng(
   booking: Booking,
   organizationName: string,
   paymentMeta?: TicketPaymentMeta | null
-): void {
+): Promise<boolean> {
   if (typeof document !== 'undefined' && document.fonts && document.fonts.status !== 'loaded') {
-    void Promise.race([
+    await Promise.race([
       document.fonts.ready,
       new Promise<void>((resolve) => window.setTimeout(resolve, 200)),
-    ]).then(() => {
-      renderAndDownloadTicket(booking, organizationName, paymentMeta);
-    });
-    return;
+    ]);
   }
 
-  renderAndDownloadTicket(booking, organizationName, paymentMeta);
+  return renderAndDownloadTicket(booking, organizationName, paymentMeta);
 }

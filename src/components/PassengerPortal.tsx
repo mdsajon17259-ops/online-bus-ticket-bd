@@ -122,6 +122,28 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupError, setLookupError] = useState('');
   const [slipBooking, setSlipBooking] = useState<Booking | null>(null);
+  const [downloadingBookingId, setDownloadingBookingId] = useState<string | null>(null);
+  const [downloadNoticeBookingId, setDownloadNoticeBookingId] = useState<string | null>(null);
+
+  const handleDirectTicketDownload = async (
+    targetBooking: Booking,
+    meta?: TicketPaymentMeta | null
+  ) => {
+    if (downloadingBookingId === targetBooking.id) return;
+    setDownloadingBookingId(targetBooking.id);
+    try {
+      const started = await downloadTicketPng(
+        targetBooking,
+        settings.organization_name,
+        meta
+      );
+      if (started) {
+        setDownloadNoticeBookingId(targetBooking.id);
+      }
+    } finally {
+      setDownloadingBookingId(null);
+    }
+  };
 
   const loadTrips = useCallback(
     async (opts?: { from?: string; to?: string; date?: string; counter_id?: string }) => {
@@ -484,6 +506,9 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
     const telHref = `tel:${counterPhone.replace(/[^0-9+]/g, '') || counterPhone}`;
 
     if (b.status === 'confirmed') {
+      const isDownloadingThis = downloadingBookingId === b.id;
+      const showNoticeForThis = downloadNoticeBookingId === b.id;
+
       return (
         <div key={b.id} className="space-y-3">
           <ConfirmedETicketCard
@@ -492,14 +517,28 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
             organizationLogoUrl={settings.organization_logo_url}
             paymentMeta={effectivePayMeta}
           />
+          {showNoticeForThis && (
+            <div
+              role="status"
+              className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 flex items-start gap-2.5 text-xs text-emerald-900"
+            >
+              <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" aria-hidden="true" />
+              <p className="font-semibold leading-relaxed">
+                টিকিট ডাউনলোড শুরু হয়েছে! আপনার ফোনের Gallery / Downloads ফোল্ডারে ছবিটি চেক করুন।
+              </p>
+            </div>
+          )}
           <div className="flex flex-wrap items-center justify-end gap-2">
             <button
               type="button"
-              onClick={() => downloadTicketPng(b, settings.organization_name, effectivePayMeta)}
-              className="min-h-[44px] px-4 py-2 text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded-lg inline-flex items-center gap-1.5 transition-colors"
+              disabled={isDownloadingThis}
+              onClick={() => handleDirectTicketDownload(b, effectivePayMeta)}
+              className="min-h-[44px] px-4 py-2 text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 disabled:opacity-60 rounded-lg inline-flex items-center gap-1.5 transition-colors"
             >
               <Download className="w-4 h-4" aria-hidden="true" />
-              <span>টিকিট ডাউনলোড করুন (Download Ticket)</span>
+              <span>
+                {isDownloadingThis ? 'ডাউনলোড হচ্ছে...' : 'টিকিট ডাউনলোড করুন (Download Ticket)'}
+              </span>
             </button>
             <button
               type="button"
@@ -1502,19 +1541,38 @@ export function PassengerPortal({ mode }: { mode: 'book' | 'lookup' }) {
 
                   {isApproved ? (
                     <div className="space-y-2.5">
+                      {downloadNoticeBookingId === receiptBookingForCard.id && (
+                        <div
+                          role="status"
+                          className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 flex items-start gap-2.5 text-xs text-emerald-900"
+                        >
+                          <CheckCircle2
+                            className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5"
+                            aria-hidden="true"
+                          />
+                          <p className="font-semibold leading-relaxed">
+                            টিকিট ডাউনলোড শুরু হয়েছে! আপনার ফোনের Gallery / Downloads ফোল্ডারে ছবিটি চেক করুন।
+                          </p>
+                        </div>
+                      )}
+
                       <button
                         type="button"
+                        disabled={downloadingBookingId === receiptBookingForCard.id}
                         onClick={() =>
-                          downloadTicketPng(
+                          handleDirectTicketDownload(
                             receiptBookingForCard,
-                            settings.organization_name,
                             confirmedPaymentMeta
                           )
                         }
-                        className="w-full min-h-[48px] px-5 py-3 text-sm font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded-xl inline-flex items-center justify-center gap-2 transition-colors"
+                        className="w-full min-h-[48px] px-5 py-3 text-sm font-semibold text-white bg-blue-700 hover:bg-blue-800 disabled:opacity-60 rounded-xl inline-flex items-center justify-center gap-2 transition-colors"
                       >
                         <Download className="w-4 h-4" aria-hidden="true" />
-                        <span>টিকিট ডাউনলোড করুন (Download Ticket)</span>
+                        <span>
+                          {downloadingBookingId === receiptBookingForCard.id
+                            ? 'ডাউনলোড হচ্ছে...'
+                            : 'টিকিট ডাউনলোড করুন (Download Ticket)'}
+                        </span>
                       </button>
 
                       <div className="flex flex-wrap items-center justify-between gap-2">

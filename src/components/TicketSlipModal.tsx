@@ -1,5 +1,5 @@
-import React from 'react';
-import { Check, Clock, Download, Phone, Printer, Ticket, X } from 'lucide-react';
+import React, { useState } from 'react';
+import { Check, CheckCircle2, Clock, Download, Phone, Printer, Ticket, X } from 'lucide-react';
 import { formatBanglaDateTime, formatBanglaNumber, formatBDT, formatShortTicketId } from '../lib/format';
 import { downloadTicketPng, getTicketPaymentMeta } from '../lib/ticketDownload';
 import type { Booking } from '../types';
@@ -42,6 +42,21 @@ export function TicketSlipModal({
   const telHref = `tel:${counterPhone.replace(/[^0-9+]/g, '') || counterPhone}`;
   const canDownload = !hideDownloadWhenPending || booking.status === 'confirmed';
   const isConfirmed = booking.status === 'confirmed';
+  const [downloading, setDownloading] = useState(false);
+  const [downloadStarted, setDownloadStarted] = useState(false);
+
+  const handleDownloadTicket = async () => {
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      const started = await downloadTicketPng(booking, organizationName, paymentMeta);
+      if (started) {
+        setDownloadStarted(true);
+      }
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   return (
     <div
@@ -202,6 +217,17 @@ export function TicketSlipModal({
               </a>
             </div>
           )}
+          {downloadStarted && (
+            <div
+              role="status"
+              className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 flex items-start gap-2.5 text-xs text-emerald-900"
+            >
+              <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" aria-hidden="true" />
+              <p className="font-semibold leading-relaxed">
+                টিকিট ডাউনলোড শুরু হয়েছে! আপনার ফোনের Gallery / Downloads ফোল্ডারে ছবিটি চেক করুন।
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Footer Actions */}
@@ -236,11 +262,14 @@ export function TicketSlipModal({
               <>
                 <button
                   type="button"
-                  onClick={() => downloadTicketPng(booking, organizationName, paymentMeta)}
-                  className="min-h-[44px] px-4 py-2 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg inline-flex items-center gap-1.5"
+                  disabled={downloading}
+                  onClick={handleDownloadTicket}
+                  className="min-h-[44px] px-4 py-2 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 disabled:opacity-60 border border-blue-200 rounded-lg inline-flex items-center gap-1.5"
                 >
                   <Download className="w-4 h-4" aria-hidden="true" />
-                  <span>টিকিট ডাউনলোড করুন (Download Ticket)</span>
+                  <span>
+                    {downloading ? 'ডাউনলোড হচ্ছে...' : 'টিকিট ডাউনলোড করুন (Download Ticket)'}
+                  </span>
                 </button>
                 <button
                   type="button"

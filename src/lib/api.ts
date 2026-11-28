@@ -222,7 +222,7 @@ export function extractErrorMessage(
   return fallback;
 }
 
-function buildApiCandidateUrls(endpoint: string): string[] {
+export function buildApiCandidateUrls(endpoint: string): string[] {
   const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
   const relativePath = cleanEndpoint.replace(/^\/+/, '');
   const candidates: string[] = [];

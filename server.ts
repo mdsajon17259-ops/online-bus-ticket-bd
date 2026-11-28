@@ -624,6 +624,99 @@ async function startServer() {
   app.get('/api/ping', handleKeepAlive);
   app.get('/api/keep-alive', handleKeepAlive);
 
+  // Short-lived in-memory PNG cache for direct HTTP Content-Disposition attachment downloads
+  // (Prevents Android WebView from opening "Share 1 photo" or failing on blob:/data: URIs)
+  const ticketExportCache = new Map<
+    string,
+    { buffer: Buffer; filename: string; expiresAt: number }
+  >();
+  const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+  const pruneTicketExportCache = () => {
+    const now = Date.now();
+    for (const [key, entry] of ticketExportCache.entries()) {
+      if (entry.expiresAt <= now) {
+        ticketExportCache.delete(key);
+      }
+    }
+    while (ticketExportCache.size >= 100) {
+      const oldestKey = ticketExportCache.keys().next().value;
+      if (!oldestKey) break;
+      ticketExportCache.delete(oldestKey);
+    }
+  };
+
+  app.post('/api/tickets/export-png', (req, res) => {
+    const { imageDataUrl, filename } = (req.body || {}) as {
+      imageDataUrl?: unknown;
+      filename?: unknown;
+    };
+
+    if (typeof imageDataUrl !== 'string' || !imageDataUrl.startsWith('data:image/png;base64,')) {
+      res.status(400).json({ error: 'সঠিক PNG ছবির ডেটা পাওয়া যায়নি' });
+      return;
+    }
+
+    const base64Payload = imageDataUrl.slice('data:image/png;base64,'.length);
+    const buffer = Buffer.from(base64Payload, 'base64');
+
+    if (
+      buffer.length < 16 ||
+      buffer.length > 5 * 1024 * 1024 ||
+      !buffer.subarray(0, 8).equals(PNG_MAGIC)
+    ) {
+      res.status(400).json({ error: 'অবৈধ PNG ফাইল ফরম্যাট' });
+      return;
+    }
+
+    const rawName = typeof filename === 'string' ? filename.trim() : '';
+    const cleanedName = rawName.replace(/[^a-zA-Z0-9._-]/g, '');
+    const safeFilename =
+      cleanedName && cleanedName.toLowerCase().endsWith('.png')
+        ? cleanedName.slice(0, 96)
+        : 'desh-travels-ticket.png';
+
+    pruneTicketExportCache();
+
+    const token = crypto.randomUUID();
+    ticketExportCache.set(token, {
+      buffer,
+      filename: safeFilename,
+      expiresAt: Date.now() + 5 * 60 * 1000,
+    });
+
+    res.status(201).json({
+      token,
+      downloadPath: `/api/tickets/export-png/${token}`,
+      filename: safeFilename,
+    });
+  });
+
+  app.get('/api/tickets/export-png/:token', (req, res) => {
+    const token = (req.params.token || '').trim();
+    if (!/^[a-f0-9-]{36}$/i.test(token)) {
+      res.status(400).json({ error: 'অবৈধ ডাউনলোড টোকেন' });
+      return;
+    }
+
+    const entry = ticketExportCache.get(token);
+    if (!entry || Date.now() > entry.expiresAt) {
+      ticketExportCache.delete(token);
+      res.status(404).json({ error: 'ডাউনলোড লিংকের মেয়াদ শেষ হয়েছে, অনুগ্রহ করে আবার ডাউনলোড চাপুন' });
+      return;
+    }
+
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${entry.filename}"; filename*=UTF-8''${encodeURIComponent(entry.filename)}`
+    );
+    res.setHeader('Content-Length', String(entry.buffer.length));
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.status(200).send(entry.buffer);
+  });
+
   app.get('/api/config', (_req, res) => {
     const supabaseUrl = (
       process.env.VITE_SUPABASE_URL ||
